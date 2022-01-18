@@ -6,6 +6,41 @@ sys.path.append("..")
 from barry.datasets.dataset import MultiDataset
 from barry.datasets.dataset_power_spectrum_abc import PowerSpectrum
 
+class PowerSpectrum_AbacusSummit(PowerSpectrum):
+    """ Power spectrum for AbacusSummit boxes with z = 0.5    """
+
+    def __init__(
+        self,
+        name=None,
+        min_k=0.02,
+        max_k=0.30,
+        step_size=1,
+        recon=None,
+        reduce_cov_factor=1,
+        num_mocks=None,
+        postprocess=None,
+        fake_diag=False,
+        realisation=None,
+        isotropic=True,
+        fit_poles=None,
+    ):
+        super().__init__(
+            "abacussummit_base_c000_ph000 ps_test.pkl",
+            name=name,
+            min_k=min_k,
+            max_k=max_k,
+            step_size=step_size,
+            recon=recon,
+            reduce_cov_factor=reduce_cov_factor,
+            num_mocks=num_mocks,
+            postprocess=postprocess,
+            fake_diag=fake_diag,
+            realisation=realisation,
+            isotropic=isotropic,
+            fit_poles=fit_poles,
+        )
+
+
 
 class PowerSpectrum_SDSS_DR12_Z061_NGC(PowerSpectrum):
     """ Power spectrum for SDSS BOSS DR12 sample for NGC with mean redshift z = 0.61    """

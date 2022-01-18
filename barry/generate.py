@@ -12,6 +12,7 @@ from barry.datasets.dataset import Dataset
 from tests.utils import get_concrete
 from barry.utils import get_hpc
 
+FORCE_LOCAL = True
 
 def setup_ptgenerator_slurm(model, c, hpc="getafix"):
     if hpc is None:
@@ -67,11 +68,10 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--refresh", action="store_true", default=False)
     args = parser.parse_args()
 
-    # datasets = [c() for c in get_concrete(Dataset) if "DESI" in c.__name__]
-    print(get_concrete(Dataset))
-    datasets = [c() for c in get_concrete(Dataset) if "PowerSpectrum_SDSS_DR12" in c.__name__ and "Dummy" not in c.__name__]
+    datasets = [c() for c in get_concrete(Dataset) if "AbacusSummit" in c.__name__ and "Dummy" not in c.__name__]
 
     cosmologies = get_cosmologies(datasets)
+
     logging.info(f"Have {len(cosmologies)} cosmologies")
 
     # Ensure all cosmologies exist
@@ -82,8 +82,9 @@ if __name__ == "__main__":
         generator.load_data(can_generate=True)
 
     # This part should be run on a HPC for the PTGenerator side of things.
-    assert not is_local(), "CAMB has been generated, but please upload and run again on your HPC system"
-    hpc = get_hpc()
+    if not FORCE_LOCAL:
+        assert not is_local(), "CAMB has been generated, but please upload and run again on your HPC system"
+        hpc = get_hpc()
 
     # For each cosmology, ensure that each model pregens the right data
     models = [c() for c in get_concrete(Model)]
