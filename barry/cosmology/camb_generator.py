@@ -96,7 +96,7 @@ class CambGenerator(object):
         self.data = None
         self.logger.info(f"Creating CAMB data with {self.om_resolution} x {self.h0_resolution}")
 
-    def load_data(self, can_generate=False):
+    def load_data(self, can_generate=True):
         if not os.path.exists(self.filename):
             if not can_generate:
                 msg = "Data does not exist and this isn't the time to generate it!"
