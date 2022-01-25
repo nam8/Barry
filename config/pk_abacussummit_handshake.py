@@ -4,10 +4,10 @@ import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.stats import norm
 import numpy as np
-
+from barry.models.model import Correction
 
 sys.path.append("..")
-from barry.datasets.dataset_power_spectrum import PowerSpectrum_AbacusSummit
+from barry.datasets.dataset_power_spectrum import PowerSpectrum_AbacusSummit, PowerSpectrum_SDSS_DR12_Z051_NGC
 from barry.cosmology.camb_generator import getCambGenerator
 from barry.config import setup
 from barry.models import PowerSpectrumFit, PowerSeo2016, PowerBeutler2017, PowerDing2018, PowerNoda2019
@@ -22,9 +22,13 @@ if __name__ == "__main__":
 
     cs = ["#262232", "#116A71", "#48AB75", "#D1E05B"]
 
-    d = PowerSpectrum_AbacusSummit(min_k=0.005, max_k=0.3, isotropic=False, realisation="data", fit_poles=[0, 2])
-
-    fitter.add_model_and_dataset(PowerBeutler2017(isotropic=False), d, name=f"Beutler 2017 Prerecon", color=cs[0])
+    # pass realisation: "data" if you want to run on particles
+    # pass realisation : 0 if you want to run on 0th mock. etc.
+    # so, in pickle_handshake, load up each mock into the list of mock_data. cool! 
+    # d = PowerSpectrum_AbacusSummit(min_k=0.0025, max_k=0.8, isotropic=False, realisation=0, fit_poles=[0])
+    d = PowerSpectrum_SDSS_DR12_Z051_NGC(recon="iso", isotropic=False, fit_poles=[0, 2], min_k=0.01, max_k=0.30, num_mocks=999)
+    # Correction.HARTLAP and SELLENTIN only work for num_mocks>1
+    fitter.add_model_and_dataset(PowerBeutler2017(isotropic=False, correction=Correction.NONE), d, name=f"Beutler 2017 Prerecon", color=cs[0])
     # fitter.add_model_and_dataset(PowerSeo2016(isotropic=False), d, name=f"Seo 2016 Prerecon", color=cs[1])
     # fitter.add_model_and_dataset(PowerDing2018(isotropic=False), d, name=f"Ding 2018 Prerecon", color=cs[2])
     # fitter.add_model_and_dataset(PowerNoda2019(isotropic=False), d, name=f"Noda 2019 Prerecon", color=cs[3])

@@ -253,6 +253,10 @@ class Model(ABC):
             assert (
                 num_mocks > 0
             ), "Cannot use HARTLAP  or SELLENTIN correction with covariance not determined from mocks. Set correction to Correction.NONE"
+            assert (
+                num_mocks > 1
+            ), "Cannot use HARTLAP  or SELLENTIN correction with only one mock. Set correction to Correction.NONE"
+        
         if self.correction is Correction.HARTLAP:  # From Hartlap 2007
             chi2 *= (num_mocks - len(data) - 2) / (num_mocks - 1)
 

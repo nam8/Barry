@@ -34,7 +34,7 @@ class DynestySampler(Sampler):
 
         if save_dims is None:
             save_dims = num_dim
-        self.logger.debug("Fitting framework with %d dimensions" % num_dim)
+        self.logger.info("Fitting framework with %d dimensions and %d live points" % (num_dim , self.nlive))
         self.logger.info("Using dynesty Sampler")
         if self.dynamic:
             sampler = dynesty.DynamicNestedSampler(
@@ -43,7 +43,44 @@ class DynestySampler(Sampler):
         else:
             sampler = dynesty.NestedSampler(log_likelihood, prior_transform, num_dim, nlive=self.nlive)
 
-        sampler.run_nested(maxiter=self.max_iter, print_progress=False)
+            
+
+        # £££££££££££££££££££££££££££££££££ 
+        # sampler.run_nested(maxiter=1000, print_progress=True)
+        sampler.run_nested(maxiter=self.max_iter, print_progress=True)
+        # res = sampler.results
+        # import matplotlib
+        # from matplotlib import pyplot as plt
+        # from dynesty import plotting as dyplot
+
+        # print(res.keys())
+
+        # dynesty.plotting.traceplot(res) 
+        # plt.savefig("/home/nam/bao_fit_project/dynesty-traceplot.png")
+        # exit(1)
+
+        # compute effective 'multi' volumes
+        # multi_logvols = [0.]  # unit cube
+        # for bound in res.bound[1:]:  # skip unit cube
+        #     logvol, funit = bound.monte_carlo_logvol(rstate=rstate, return_overlap=True)
+        #     multi_logvols.append(logvol +np.log( funit))  # numerical estimate via Monte Carlo methods
+        # multi_logvols = np.array(multi_logvols)
+
+        # # plot results as a function of ln(volume)
+        # plt.figure(figsize=(12,6))
+        # plt.xlabel(r'$-\ln X_i$')
+        # plt.ylabel(r'$\ln V_i$')
+
+        # # 'multi'
+        # x, it = -res.logvol, res.bound_iter
+        # y = multi_logvols[it]
+        # plt.plot(x, y, lw=3, label='multi')
+        # plt.legend(loc='best', fontsize=24);
+        # plt.savefig("/home/nam/bao_fit_project/dynesty.png")
+        # exit(1)
+
+        # £££££££££££££££££££££££££££££££££ 
+
 
         self.logger.debug("Fit finished")
 

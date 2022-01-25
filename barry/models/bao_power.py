@@ -93,6 +93,27 @@ class PowerSpectrumFit(Model):
         datapk = splev(kval, splrep(data["ks"], data["pk0"]))
         cambpk = self.camb.get_data(om=c["om"], h0=c["h0"])
         modelpk = splev(kval, splrep(cambpk["ks"], cambpk["pk_lin"]))
+
+
+        # NAM debugging... 
+        # Plot CAMB generated PS against data PS. 
+        # print(cambpk.keys())
+        # import matplotlib.pyplot as plt
+
+        # fig, ax = plt.subplots()
+        # ax.plot(   data["ks"],   data["pk0"], label='data'  )
+        # ax.plot( cambpk["ks"], cambpk["pk_lin"], label='camb lin'  )
+        # ax.plot( cambpk["ks"], cambpk["pk_nl_0"], label='camb nl0'  )
+        # ax.plot( cambpk["ks"], cambpk["pk_nl_z"], label='camb nlz'  )
+        # ax.plot( cambpk["ks"], cambpk["pk_nl_z"]+cambpk["pk_lin"], label='camb tot'  )
+
+        # ax.set_xscale("log")
+        # ax.legend(loc="upper right")
+        # plt.tight_layout()
+        # plt.savefig("/home/nam/bao_fit_project/data-vs-camb-pk.png")
+        # exit(1)
+
+
         kaiserfac = datapk / modelpk
         f = self.param_dict.get("f") if self.param_dict.get("f") is not None else Omega_m_z(c["om"], c["z"]) ** 0.55
         b = -1.0 / 3.0 * f + np.sqrt(kaiserfac - 4.0 / 45.0 * f ** 2)

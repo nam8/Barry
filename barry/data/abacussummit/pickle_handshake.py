@@ -78,8 +78,13 @@ def getcomp(ks):
 
 if __name__ == "__main__":
 
+    # TODO: in Barry/config/pk_abacussummit_handshake.py, you can actually pass lots of different
+    # mock realisations for the same box. 
+    # that's why barry expects a list of mocks in post/pre-recon-mocks.
+    # so adapt this once you have more mocks! to read in all mocks for a given box. 
+
     ds = os.path.join(RESULTS_BASE_DIR, SIM, REDSHIFT, "recon/")
-    ds = os.path.join("/Users/nina/Desktop/Harvard/phd/bao_project/")
+    # ds = os.path.join("/Users/nina/Desktop/Harvard/phd/bao_project/")
 
     # find all pickles! one pickle per data type (e.g. particles? or galaxies?). each pickle contains pre and post recon PSs and Xis. 
     files = [ds + f for f in os.listdir(ds) if "pickle" in f]
@@ -111,17 +116,24 @@ if __name__ == "__main__":
     cov = np.eye(5 * len(ks), 5 * len(ks))
 
     cosmology = {
+    # AbacusSummit read the docs says:
+    # remember that Omega_M = (om_b + om_cdm + om_nu ) / h^2 
+    # therefore om_b = Om_b * h^2 
+    # so we copy/paste the AS values here, directly. 
+    # Omega_Nu (Ncdm) * h^2 = sum(mi) / 93.14 eV 
+    # for base boxes, we only have one N_Ncdm and 2 N_ur
             "om": (0.12 + 0.02237 + 0.0006442) / 0.6736 ** 2,
             "h0": 0.6736,
             "z": 0.5,
             "ob": 0.02237 / 0.6736 ** 2,
             "ns": 0.9649,
-            "mnu": 0.0006442 * 93.14, #NAM WHAT IS 93.14 IN OUR CASE?
-            "reconsmoothscale": 10, #NAM CULLAN HAD THIS AS 15. WHAT IS IT IN OUR CASE? 
-                                  # is it gaussian_sigma in reconstruction.py?
+            "mnu": 0.0006442 * 93.14, 
+            "reconsmoothscale": 10, 
             }
 
     res = getpk(recon_res)
+
+    print(res["pre-recon data"])
     
     split = {
         "pre-recon data":   [res["pre-recon data"]] ,
