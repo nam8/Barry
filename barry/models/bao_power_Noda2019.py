@@ -155,6 +155,7 @@ class PowerNoda2019(PowerSpectrumFit):
         xs = np.linspace(-0.999, 0.999, nx)
         r = np.outer(1.0 / ks, ks)
 
+        # this will generate runtime warnings, but don't panic! see next comment. 
         J00 = (
             12.0 / r ** 2
             - 158.0
@@ -369,7 +370,7 @@ class PowerNoda2019(PowerSpectrumFit):
             pk = [pk0, pk2, pk4]
             poly = np.zeros((1, 3, len(k)))
 
-        return kprime, pk[0], pk[1], pk[2], poly
+        return kprime, [pk[0], pk[1], pk[2]], poly
 
 
 if __name__ == "__main__":

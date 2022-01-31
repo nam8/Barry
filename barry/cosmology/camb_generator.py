@@ -76,11 +76,12 @@ class CambGenerator(object):
         hh = int(h0 * 10000)
         self.filename_unique = f"{int(self.redshift * 1000)}_{self.om_resolution}_{self.h0_resolution}_{hh}_{int(ob * 10000)}_{int(ns * 1000)}_{int(mnu * 10000)}"
         self.filename = self.data_dir + f"/camb_{self.filename_unique}.npy"
-
         self.k_min = 1e-4
         self.k_max = 5
         self.k_num = 2000
         self.ks = np.logspace(np.log(self.k_min), np.log(self.k_max), self.k_num, base=np.e)
+        print("\n\n\nNAM DEBUGGING camb_generator.py 83: ", self.k_min, self.k_max, self.k_num, self.ks,"\n\n\n")
+
         self.recon_smoothing_scale = recon_smoothing_scale
         self.smoothing_kernel = np.exp(-self.ks ** 2 * self.recon_smoothing_scale ** 2 / 2.0)
 
@@ -106,7 +107,7 @@ class CambGenerator(object):
                 self.data = self._generate_data()
         else:
             self.data = np.load(self.filename)
-            self.logger.info("Loading existing CAMB data")
+            self.logger.info(f"Loading existing CAMB data from {self.filename}")
 
     @lru_cache(maxsize=512)
     def get_data(self, om=0.31, h0=None):

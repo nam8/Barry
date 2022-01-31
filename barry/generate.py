@@ -15,34 +15,59 @@ from barry.utils import get_hpc
 FORCE_LOCAL = True
 
 def setup_ptgenerator_slurm(model, c, hpc="getafix"):
-    if hpc is None:
-        raise ValueError("HPC environment variable is not set. Please set it to an hpc system, like export HPC=nersc")
-    config = get_config()
-    hpc_config = config.get("hpcs", {}).get(hpc, {})
-    job_path = os.path.join(os.path.dirname(inspect.stack()[0][1]), f"jobscripts/slurm_pt_generator_{hpc}.job")
-    python_path = os.path.abspath(os.path.dirname(inspect.stack()[0][1]))
-    unique_name = model.__class__.__name__ + "_" + ("".join([k + str(c[k]) for k in sorted(c.keys())])) + ".job"
-    job_dir = os.path.abspath("jobs")
-    output = os.path.join(job_dir, "zlog")
-    d = {
-        "name": unique_name,
-        "mpi_module": hpc_config["mpi_module"],
-        "fort_compile_module": hpc_config["fort_compile_module"],
-        "path": python_path,
-        "output": output,
-        "model": model.__class__.__name__,
-    }
-    with open(job_path) as f:
-        raw_template = f.read()
-    d.update(c)
-    template = raw_template.format(**d)
+    if FORCE_LOCAL:
+        job_path = os.path.join(os.path.dirname(inspect.stack()[0][1]), f"jobscripts/slurm_pt_generator_nersc.job")
+        python_path = os.path.abspath(os.path.dirname(inspect.stack()[0][1]))
+        unique_name = model.__class__.__name__ + "_" + ("".join([k + str(c[k]) for k in sorted(c.keys())])) + ".job"
+        job_dir = os.path.abspath("jobs")
+        output = os.path.join(job_dir, "zlog")
+        d = {
+            "name": unique_name,
+            "mpi_module": "mpimodule",
+            "fort_compile_module": "fort_compile_module",
+            "path": python_path,
+            "output": output,
+            "model": model.__class__.__name__,
+        }
+        with open(job_path) as f:
+            raw_template = f.read()
+        d.update(c)
+        template = raw_template.format(**d)
 
-    filename = os.path.join(job_dir, unique_name)
-    os.makedirs(job_dir, exist_ok=True)
-    with open(filename, "w") as f:
-        f.write(template)
-    logging.info(f"Submitting regen for {filename}")
-    os.system(f"{config['hpc_submit_command']} {filename}")
+        single_node_command = 'python precompute_singlenode.py ' + str(template.split('precompute_mpi.py')[-1])
+        logging.info(f"Submitting regen for {model.__class__.__name__}, with {single_node_command}")
+        os.system(f"{single_node_command}")
+
+    else: 
+        if hpc is None:
+            raise ValueError("HPC environment variable is not set. Please set it to an hpc system, like export HPC=nersc")
+        
+        config = get_config()
+        hpc_config = config.get("hpcs", {}).get(hpc, {})
+        job_path = os.path.join(os.path.dirname(inspect.stack()[0][1]), f"jobscripts/slurm_pt_generator_{hpc}.job")
+        python_path = os.path.abspath(os.path.dirname(inspect.stack()[0][1]))
+        unique_name = model.__class__.__name__ + "_" + ("".join([k + str(c[k]) for k in sorted(c.keys())])) + ".job"
+        job_dir = os.path.abspath("jobs")
+        output = os.path.join(job_dir, "zlog")
+        d = {
+            "name": unique_name,
+            "mpi_module": hpc_config["mpi_module"],
+            "fort_compile_module": hpc_config["fort_compile_module"],
+            "path": python_path,
+            "output": output,
+            "model": model.__class__.__name__,
+        }
+        with open(job_path) as f:
+            raw_template = f.read()
+        d.update(c)
+        template = raw_template.format(**d)
+
+        filename = os.path.join(job_dir, unique_name)
+        os.makedirs(job_dir, exist_ok=True)
+        with open(filename, "w") as f:
+            f.write(template)
+        logging.info(f"Submitting regen for {filename}")
+        os.system(f"{config['hpc_submit_command']} {filename}")
 
 
 def get_cosmologies(datasets):
@@ -68,7 +93,8 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--refresh", action="store_true", default=False)
     args = parser.parse_args()
 
-    datasets = [c() for c in get_concrete(Dataset) if "AbacusSummit" in c.__name__ and "Dummy" not in c.__name__]
+    # datasets = [c() for c in get_concrete(Dataset) if "AbacusSummit" in c.__name__ and "Dummy" not in c.__name__]
+    datasets = [c() for c in get_concrete(Dataset) if "PowerSpectrum_SDSS_DR12_Z061_NGC" in c.__name__ and "Dummy" not in c.__name__]
 
     cosmologies = get_cosmologies(datasets)
 
@@ -85,6 +111,8 @@ if __name__ == "__main__":
     if not FORCE_LOCAL:
         assert not is_local(), "CAMB has been generated, but please upload and run again on your HPC system"
         hpc = get_hpc()
+    else:
+        hpc = None 
 
     # For each cosmology, ensure that each model pregens the right data
     models = [c() for c in get_concrete(Model)]

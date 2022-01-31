@@ -61,7 +61,7 @@ if __name__ == "__main__":
     h0s = camb.h0s
     all_indexes = [(i, j) for i in range(len(omch2s)) for j in range(len(h0s))]
 
-    assert mpi_comm is not None, "Yeah this is going to need MPI, which isnt working for some reason..."
+    assert mpi_comm is not None, "Yeah this is going to need MPI, which isn't working for some reason..."
     size = mpi_comm.Get_size()
     logging.info(f"Running generation via MPI with size {size}")
 
