@@ -30,7 +30,6 @@ if __name__ == "__main__":
            
     fitter.set_sampler(sampler)
     fitter.set_num_walkers(1)
-    fitter.set_num_concurrent(700)
     fitter.fit(file)
 
     model_results, summary = get_model_comparison_dataframe(fitter)
