@@ -38,7 +38,6 @@ def write_jobscript_slurm(filename, name=None, num_tasks=24, num_concurrent=24, 
     with open(slurm_job) as f:
         raw_template = f.read()
     template = raw_template.format(**d)
-
     n = "%s/%s.q" % (q_dir, executable[: executable.index(".py")])
     with open(n, "w") as f:
         f.write(template)

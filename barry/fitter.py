@@ -144,7 +144,6 @@ class Fitter(object):
         return self.sampler
 
     def _run_fit(self, model_index, walker_index):
-
         model = self.model_datasets[model_index][0]
         data = self.model_datasets[model_index][1]
 
@@ -176,8 +175,13 @@ class Fitter(object):
 
         if self.is_local():
             # Only do the first model+dataset on a local computer as a test
-            self.logger.info("Running locally on the 0th index.")
-            self._run_fit(0, 0)
+            self.logger.info("Running locally on all indices.")
+
+            for mi in range(num_models):
+                for wi in range(self.num_walkers):
+                    self.logger.info("Running model_dataset %d, walker number %d" % (mi, wi))
+                    self._run_fit(mi, wi)
+
         else:
             if len(sys.argv) == 1:
                 # if launching the job for the first time

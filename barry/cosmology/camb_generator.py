@@ -80,8 +80,6 @@ class CambGenerator(object):
         self.k_max = 5
         self.k_num = 2000
         self.ks = np.logspace(np.log(self.k_min), np.log(self.k_max), self.k_num, base=np.e)
-        print("\n\n\nNAM DEBUGGING camb_generator.py 83: ", self.k_min, self.k_max, self.k_num, self.ks,"\n\n\n")
-
         self.recon_smoothing_scale = recon_smoothing_scale
         self.smoothing_kernel = np.exp(-self.ks ** 2 * self.recon_smoothing_scale ** 2 / 2.0)
 
@@ -104,6 +102,7 @@ class CambGenerator(object):
                 self.logger.error(msg)
                 raise ValueError(msg)
             else:
+                self.logger.info(f"Generating CAMB data for {self.filename}")
                 self.data = self._generate_data()
         else:
             self.data = np.load(self.filename)

@@ -119,13 +119,9 @@ class PowerSpectrumFit(Model):
 
         try: 
             b = -1.0 / 3.0 * f + np.sqrt(kaiserfac - 4.0 / 45.0 * f ** 2)
-            print(f, kaiserfac, b, kaiserfac - 4.0 / 45.0 * f ** 2)
 
         except TypeError:
             b = -1.0 / 3.0 * f.default + np.sqrt(kaiserfac - 4.0 / 45.0 * f.default ** 2)
-            print(f.default, kaiserfac, b, kaiserfac - 4.0 / 45.0 * f.default ** 2)
-
-
 
         min_b, max_b = (1.0 - width) * b, (1.0 + width) * b
         self.set_default("b", b ** 2, min=min_b ** 2, max=max_b ** 2)
