@@ -22,9 +22,10 @@ class CorrelationFunction(Dataset, ABC):
         num_mocks=None,
         fake_diag=False,
         realisation=None,
-        isotropic=False,
-        fit_poles=None,
+        isotropic=True,
+        fit_poles=(0,),
     ):
+
         current_file = os.path.dirname(inspect.stack()[0][1])
         self.data_location = os.path.normpath(current_file + f"/../data/{filename}")
         self.min_dist = min_dist
@@ -140,8 +141,6 @@ class CorrelationFunction(Dataset, ABC):
             self.logger.error("ERROR, setting an inappropriate covariance matrix that is almost singular!!!!")
             self.logger.error(f"These should all be 1: {v}")
 
-        d = np.sqrt(np.diag(self.cov))
-        self.corr = self.cov / (d * np.atleast_2d(d).T)
         self.icov = np.linalg.inv(self.cov_fit)
 
     def _compute_cov(self):

@@ -20,9 +20,9 @@ class PowerSpectrumFit(Model):
         fix_params=("om"),
         postprocess=None,
         smooth=False,
+        recon=None,
         correction=None,
         isotropic=True,
-        poly_poles=(0, 2),
         marg=None,
     ):
         """Generic power spectrum function model
@@ -43,10 +43,18 @@ class PowerSpectrumFit(Model):
             Defaults to `Correction.SELLENTIN
         """
         super().__init__(name, postprocess=postprocess, correction=correction, isotropic=isotropic, marg=marg)
-        self.poly_poles = poly_poles
         self.smooth_type = smooth_type.lower()
         if not validate_smooth_method(smooth_type):
             exit(0)
+
+        self.recon = False
+        self.recon_type = "None"
+        if recon is not None:
+            if recon.lower() != "None":
+                self.recon_type = "iso"
+                if recon.lower() == "ani":
+                    self.recon_type = "ani"
+                self.recon = True
 
         self.declare_parameters()
         self.set_fix_params(fix_params)
@@ -56,6 +64,10 @@ class PowerSpectrumFit(Model):
 
         self.nmu = 100
         self.mu = np.linspace(0.0, 1.0, self.nmu)
+
+        self.kvals = None
+        self.pksmooth = None
+        self.pkratio = None
 
     def set_data(self, data, parent=False):
         """Sets the models data, including fetching the right cosmology and PT generator.
@@ -115,17 +127,25 @@ class PowerSpectrumFit(Model):
 
 
         kaiserfac = datapk / modelpk
-        f = self.param_dict.get("f") if self.param_dict.get("f") is not None else Omega_m_z(c["om"], c["z"]) ** 0.55
+#        f = self.param_dict.get("f") if self.param_dict.get("f") is not None else Omega_m_z(c["om"], c["z"]) ** 0.55
+#
+#        try: 
+#            b = -1.0 / 3.0 * f + np.sqrt(kaiserfac - 4.0 / 45.0 * f ** 2)
+#
+#        except TypeError:
+#            b = -1.0 / 3.0 * f.default + np.sqrt(kaiserfac - 4.0 / 45.0 * f.default ** 2)
+#
+#        min_b, max_b = (1.0 - width) * b, (1.0 + width) * b
+#        self.set_default("b", b ** 2, min=min_b ** 2, max=max_b ** 2)
+#        self.logger.info(f"Setting default bias to b={b:0.5f} with {width:0.5f} fractional width")
 
-        try: 
-            b = -1.0 / 3.0 * f + np.sqrt(kaiserfac - 4.0 / 45.0 * f ** 2)
+        f = self.get_default("f") if self.param_dict.get("f") is not None else Omega_m_z(c["om"], c["z"]) ** 0.55
+        b = -1.0 / 3.0 * f + np.sqrt(kaiserfac - 4.0 / 45.0 * f ** 2)
+        if not self.marg:
+            min_b, max_b = (1.0 - width) * b, (1.0 + width) * b
+            self.set_default("b", b ** 2, min=min_b ** 2, max=max_b ** 2)
+            self.logger.info(f"Setting default bias to b={b:0.5f} with {width:0.5f} fractional width")
 
-        except TypeError:
-            b = -1.0 / 3.0 * f.default + np.sqrt(kaiserfac - 4.0 / 45.0 * f.default ** 2)
-
-        min_b, max_b = (1.0 - width) * b, (1.0 + width) * b
-        self.set_default("b", b ** 2, min=min_b ** 2, max=max_b ** 2)
-        self.logger.info(f"Setting default bias to b={b:0.5f} with {width:0.5f} fractional width")
         if self.param_dict.get("beta") is not None:
             beta, beta_min, beta_max = f / b, (1.0 - width) * f / b, (1.0 + width) * f / b
             self.set_default("beta", beta, beta_min, beta_max)
@@ -164,26 +184,6 @@ class PowerSpectrumFit(Model):
         pk_ratio = res["pk_lin"] / pk_smooth_lin - 1.0  # Get the ratio
         return pk_smooth_lin, pk_ratio
 
-    def get_alphas(self, alpha, epsilon):
-        """Computes values of alpha_par and alpha_perp from the input values of alpha and epsilon
-
-        Parameters
-        ----------
-        alpha : float
-            The isotropic dilation scale
-        epsilon: float
-            The anisotropic warping
-
-        Returns
-        -------
-        alpha_par : float
-            The dilation scale parallel to the line-of-sight
-        alpha_perp : float
-            The dilation scale perpendicular to the line-of-sight
-
-        """
-        return alpha * (1.0 + epsilon) ** 2, alpha / (1.0 + epsilon)
-
     @lru_cache(maxsize=32)
     def get_kprimefac(self, epsilon):
         """Computes the prefactor to dilate a k value given epsilon, such that kprime = k * kprimefac / alpha
@@ -204,25 +204,6 @@ class PowerSpectrumFit(Model):
         kprimefac = np.sqrt(musq / epsilonsq ** 2 + (1.0 - musq) * epsilonsq)
         return kprimefac
 
-    @lru_cache(maxsize=32)
-    def get_muprime(self, epsilon):
-        """Computes dilated values of mu given input values of epsilon for the power spectrum
-
-        Parameters
-        ----------
-        epsilon: float
-            The anisotropic warping
-
-        Returns
-        -------
-        muprime : np.ndarray
-            The dilated mu values
-
-        """
-        musq = self.mu ** 2
-        muprime = self.mu / np.sqrt(musq + (1.0 + epsilon) ** 6 * (1.0 - musq))
-        return muprime
-
     def integrate_mu(self, pk2d, isotropic=False):
         pk0 = simps(pk2d, self.mu, axis=1)
         if isotropic:
@@ -234,7 +215,7 @@ class PowerSpectrumFit(Model):
             pk2 = 2.5 * (pk2 - pk0)
         return pk0, pk2, pk4
 
-    def compute_power_spectrum(self, k, p, smooth=False, for_corr=False):
+    def compute_power_spectrum(self, k, p, smooth=False, for_corr=False, data_name=None):
         """Get raw ks and p(k) multipoles for a given parametrisation dilated based on the values of alpha and epsilon
 
         Parameters
@@ -257,36 +238,77 @@ class PowerSpectrumFit(Model):
             the model quadrupole interpolated using the dilation scales. Will be 'None' if the model is isotropic
 
         """
-        ks = self.camb.ks
-        pk_smooth, pk_ratio = self.compute_basic_power_spectrum(p["om"])
+        # Get the basic power spectrum components
+        if self.kvals is None or self.pksmooth is None or self.pkratio is None:
+            ks = self.camb.ks
+            pk_smooth_lin, pk_ratio = self.compute_basic_power_spectrum(p["om"])
+        else:
+            ks = self.kvals
+            pk_smooth_lin, pk_ratio = self.pksmooth, self.pkratio
 
-        # Work out the dilated values for the power spectra
+        # We split for isotropic and anisotropic here for consistency with our previous isotropic convention, which
+        # differs from our implementation of the Beutler2017 isotropic model quite a bit. This results in some duplication
+        # of code and a few nested if statements, but it's perhaps more readable and a little faster (because we only
+        # need one interpolation for the whole isotropic monopole, rather than separately for the smooth and wiggle components)
+        pk = [np.zeros(len(k)), np.zeros(len(k)), np.zeros(len(k))]
+
         if self.isotropic:
             kprime = k if for_corr else k / p["alpha"]
+            pk_smooth = splev(kprime, splrep(ks, pk_smooth_lin))
+            if not for_corr:
+                pk_smooth *= p["b"]
+
+            if smooth:
+                pk[0] = pk_smooth if for_corr else pk_smooth
+            else:
+                # Compute the propagator
+                C = np.ones(len(ks))
+                propagator = splev(kprime, splrep(ks, (1.0 + pk_ratio * C)))
+                pk[0] = pk_smooth * propagator
+
+            poly = np.zeros((1, len(k)))
+            if self.marg:
+                prefac = np.ones(len(kprime)) if smooth else propagator
+                poly = prefac * [pk_smooth]
+
         else:
+
             epsilon = 0 if for_corr else p["epsilon"]
-            kprime = np.tile(k, (self.nmu, 1)) if for_corr else np.outer(k / p["alpha"], self.get_kprimefac(epsilon))
+            kprime = np.tile(k, (self.nmu, 1)).T if for_corr else np.outer(k / p["alpha"], self.get_kprimefac(epsilon))
             muprime = self.mu if for_corr else self.get_muprime(epsilon)
+            if self.recon_type.lower() == "iso":
+                kaiser_prefac = 1.0 + p["beta"] * muprime ** 2 * (1.0 - splev(kprime, splrep(self.camb.ks, self.camb.smoothing_kernel)))
+            else:
+                kaiser_prefac = 1.0 + p["beta"] * muprime ** 2
+            pk_smooth = kaiser_prefac ** 2 * splev(kprime, splrep(ks, pk_smooth_lin))
+            if not for_corr:
+                pk_smooth *= p["b"]
 
-        if smooth:
-            pkprime = p["b"] * splev(kprime, splrep(ks, pk_smooth))
-        else:
-            pkprime = p["b"] * splev(kprime, splrep(ks, pk_smooth * (1 + pk_ratio)))
-
-        # Get the multipoles
-        if self.isotropic:
-            pk0 = pkprime
-            pk2 = None
-            pk4 = None
-        else:
-            growth = p["f"]
-            s = self.camb.smoothing_kernel
-            kaiser_prefac = 1.0 + growth / np.sqrt(p["b"]) * np.outer(1.0 - s, muprime ** 2)
-            pk2d = kaiser_prefac * pkprime
+            # Compute the propagator
+            if smooth:
+                pk2d = pk_smooth
+            else:
+                C = np.ones(len(ks))
+                pk2d = pk_smooth * (1.0 + splev(kprime, splrep(ks, pk_ratio)) * C)
 
             pk0, pk2, pk4 = self.integrate_mu(pk2d)
 
-        return kprime, [pk0, pk2, pk4], np.zeros((1, len(k)))
+            # Polynomial shape
+            pk = [pk0, np.zeros(len(k)), pk2, np.zeros(len(k)), pk4]
+
+            if for_corr:
+                poly = None
+                kprime = k
+            else:
+                if self.marg:
+                    poly = np.zeros((1, 5, len(k)))
+                    poly[0, :, :] = pk
+                    pk = [np.zeros(len(k))] * 5
+                else:
+                    poly = np.zeros((1, 5, len(k)))
+
+#        return kprime, [pk0, pk2, pk4], np.zeros((1, len(k)))
+        return kprime, pk, poly
 
     def adjust_model_window_effects(self, pk_generated, data, window=True, wide_angle=True):
         """Take the window effects into account.
@@ -516,8 +538,8 @@ class PowerSpectrumFit(Model):
             bband = self.get_ML_nuisance(
                 self.data[0]["pk"], mod_fit, mod_fit_odd, polymod_fit, polymod_fit_odd, self.data[0]["icov"], self.data[0]["icov_m_w"]
             )
-            mod += mod_odd + bband @ (polymod + polymod_odd)
-            mod_fit += mod_fit_odd + bband @ (polymod_fit + polymod_fit_odd)
+            mod = mod + mod_odd + bband @ (polymod + polymod_odd)
+            mod_fit = mod_fit + mod_fit_odd + bband @ (polymod_fit + polymod_fit_odd)
 
             print(len(self.get_active_params()) + len(bband))
             print(f"Maximum likelihood nuisance parameters at maximum a posteriori point are {bband}")
@@ -542,10 +564,10 @@ class PowerSpectrumFit(Model):
                 self.data[0]["icov"],
                 self.data[0]["icov_m_w"],
             )
-            smooth += smooth_odd + bband_smooth @ (polysmooth + polysmooth_odd)
+            smooth = smooth + smooth_odd + bband_smooth @ (polysmooth + polysmooth_odd)
         else:
-            mod += mod_odd
-            smooth += smooth_odd
+            mod = mod + mod_odd
+            smooth = smooth + smooth_odd
 
         # Mask the model to match the data points
         mod = mod[self.data[0]["w_mask"]]

@@ -51,7 +51,7 @@ class PowerSpectrum_SDSS_DR12(PowerSpectrum):
 
     def __init__(
         self,
-        redshift_bin=1,
+        redshift_bin=3,
         galactic_cap="ngc",
         name=None,
         min_k=0.02,
@@ -64,7 +64,7 @@ class PowerSpectrum_SDSS_DR12(PowerSpectrum):
         fake_diag=False,
         realisation=None,
         isotropic=True,
-        fit_poles=None,
+        fit_poles=(0,),
     ):
 
         if redshift_bin not in [1, 2, 3]:
@@ -76,8 +76,12 @@ class PowerSpectrum_SDSS_DR12(PowerSpectrum):
         if any(pole in [1, 3] for pole in fit_poles):
             raise NotImplementedError("Only even multipoles included in SDSS_DR12")
 
-        if realisation.lower() == "data" and any(pole in [4] for pole in fit_poles):
-            raise NotImplementedError("Hexadecapole not included in SDSS_DR12 data realisation, only in mocks")
+        if realisation is not None:
+            if not isinstance(realisation, int):
+                if realisation.lower() != "data":
+                    raise ValueError("Realisation is not None (mock mean), an integer (mock realisation), or 'data'")
+                elif any(pole in [4] for pole in fit_poles):
+                    raise NotImplementedError("Hexadecapole not included in SDSS_DR12 data realisation, only in mocks")
 
         reds = ["z1", "z2", "z3"]
         datafile = "sdss_dr12_pk_" + galactic_cap.lower() + "_" + reds[redshift_bin - 1] + ".pkl"
@@ -107,7 +111,7 @@ class PowerSpectrum_Beutler2019(PowerSpectrum):
 
     def __init__(
         self,
-        redshift_bin=1,
+        redshift_bin=3,
         galactic_cap="ngc",
         name=None,
         min_k=0.02,
@@ -120,17 +124,22 @@ class PowerSpectrum_Beutler2019(PowerSpectrum):
         fake_diag=False,
         realisation=None,
         isotropic=True,
-        fit_poles=None,
+        fit_poles=(0,),
     ):
 
         if recon is not None:
-            raise NotImplementedError("Post-recon data not available for Beutler2019_DR12_Z038")
+            raise NotImplementedError("Post-recon data not available for Beutler2019 data")
 
         if redshift_bin not in [1, 3]:
-            raise NotImplementedError("Redshift bin for SDSS_DR12 must be 1 or 3, corresponding to 0.38 and 0.61 respectively")
+            raise NotImplementedError("Redshift bin for Beutler2019 must be 1 or 3, corresponding to 0.38 and 0.61 respectively")
 
         if galactic_cap.lower() not in ["ngc", "sgc"]:
-            raise NotImplementedError("Galactic cap for SDSS_DR12 must be NGC or SGC")
+            raise NotImplementedError("Galactic cap for Beutler2019 must be NGC or SGC")
+
+        if realisation is not None:
+            if not isinstance(realisation, int):
+                if realisation.lower() != "data":
+                    raise ValueError("Realisation is not None (mock mean), an integer (mock realisation), or 'data'")
 
         reds = ["z038", "z051", "z061"]
         datafile = "beutler_2019_dr12_" + reds[redshift_bin - 1] + "_pk_" + galactic_cap.lower() + ".pkl"
@@ -167,8 +176,8 @@ class PowerSpectrum_DESIMockChallenge_Post(PowerSpectrum):
         postprocess=None,
         fake_diag=False,
         realisation=None,
-        isotropic=False,
-        fit_poles=(0, 2),
+        isotropic=True,
+        fit_poles=(0,),
         covtype="cov-std",
         smoothtype="15",
     ):
@@ -221,8 +230,8 @@ class PowerSpectrum_DESILightcone_Mocks_Recon(PowerSpectrum):
         postprocess=None,
         fake_diag=False,
         realisation=None,
-        isotropic=False,
-        fit_poles=(0, 2),
+        isotropic=True,
+        fit_poles=(0,),
         type="julian_reciso",
     ):
 

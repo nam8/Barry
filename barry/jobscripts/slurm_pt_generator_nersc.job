@@ -3,7 +3,7 @@
 #SBATCH --qos=shared
 #SBATCH -C haswell
 #SBATCH --ntasks=20
-#SBATCH --account=desi
+#SBATCH --account={account}
 #SBATCH --cpus-per-task=1
 #SBATCH --nodes=1
 #SBATCH --mem-per-cpu=4GB
@@ -12,11 +12,11 @@
 #SBATCH -o {output}.o%j
 
 source ~/.bashrc.ext
-mydesienv
 module load {mpi_module}
 module load {fort_compile_module}
 conda deactivate
-conda activate Barry
+conda activate {conda_env}
+conda list
 echo "Activated python"
 echo `which python`
 
