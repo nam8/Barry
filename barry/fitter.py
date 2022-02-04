@@ -66,6 +66,11 @@ class Fitter(object):
             I often use this to name my pairs to make it convenient to load into `ChainConsumer`.
 
         """
+
+        if "realisation" not in extra_args:
+            extra_args["realisation"] = dataset.realisation
+        if "name" not in extra_args:
+            extra_args["name"] = dataset.get_name() + " + " + model.get_name()
         self.model_datasets.append((model, dataset.get_data(), extra_args))
 
     def set_num_concurrent(self, num_concurrent=None):
@@ -162,7 +167,7 @@ class Fitter(object):
         return shutil.which(get_config()["hpc_determining_command"]) is None
 
     def should_plot(self):
-        # Plot if we're running on the laptop, or we've passed a -1 as the only argument
+        # Plot if we're running on the laptop, or we've passed "plot" as the argument
         # to the python script on the HPC
         return self.is_local() or (len(sys.argv) == 2 and sys.argv[1] == "plot")
 
