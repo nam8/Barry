@@ -504,7 +504,7 @@ class PowerSpectrumFit(Model):
         return pk_model, pk_model_odd, poly_model, poly_model_odd, mask
 
     def plot(self, params, smooth_params=None, figname=None):
-        self.logger.info("Create plot")
+        self.logger.info(f"Create plot with figname {figname}")
         import matplotlib.pyplot as plt
 
         # Ensures we plot the window convolved model
@@ -593,11 +593,11 @@ class PowerSpectrumFit(Model):
         plt.subplots_adjust(left=0.1, top=ratio, bottom=0.05, right=0.85, hspace=0, wspace=0.3)
         for ax, err, mod, smooth, name, label, c in zip(axes, errs, mods, smooths, names, labels, cs):
 
-            # Plot ye old data
+            # Plot ye olde data
             ax[0].errorbar(ks, ks * self.data[0][name], yerr=ks * err, fmt="o", ms=4, label="Data", c=c)
             ax[1].errorbar(ks, ks * (self.data[0][name] - smooth), yerr=ks * err, fmt="o", ms=4, label="Data", c=c)
 
-            # Plot ye old model
+            # Plot ye olde model
             ax[0].plot(ks, ks * mod, c=c, label="Model")
             ax[1].plot(ks, ks * (mod - smooth), c=c, label="Model")
 
