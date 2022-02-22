@@ -35,6 +35,7 @@ from barry.datasets.dataset_power_spectrum import (
     PowerSpectrum_AbacusSummit,
     PowerSpectrum_SDSS_DR12,
     PowerSpectrum_Beutler2019,
+    PowerSpectrum_DESIMockChallenge_Post,
 )
 
 __all__ = [

@@ -12,20 +12,26 @@ class PowerSpectrum_AbacusSummit(PowerSpectrum):
     def __init__(
         self,
         name=None,
+        box=None, 
+        redshift=None, # how do we want to organise this? mock name? think... 
         min_k=0.0025,
         max_k=0.8,
         step_size=1,
-        recon=None,
+        recon='iso', #when we do use recon, is it iso or aniso? 
+        recon_nrandom=None,
         reduce_cov_factor=1,
         num_mocks=None,
         postprocess=None,
         fake_diag=False,
         realisation=None,
-        isotropic=True,
-        fit_poles=None,
+        isotropic=True, #what about this? 
+        fit_poles=(0,), #what about quadrupole? 
     ):
+
+        datafile = box + "_" + redshift + "_" + recon_nrandom + "_allA_ps.pkl"
+
         super().__init__(
-            "abacussummit_base_c000_ph000 ps_test.pkl",
+            datafile, 
             name=name,
             min_k=min_k,
             max_k=max_k,

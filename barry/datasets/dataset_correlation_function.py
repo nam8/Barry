@@ -5,9 +5,23 @@ from barry.datasets.dataset_correlation_function_abc import CorrelationFunction
 class CorrelationFunction_AbacusSummit(CorrelationFunction):
     """ Correlation function for AbacusSummit boxes with redshift z = 0.5    """
 
-    def __init__(self, name=None, min_dist=30, max_dist=200, recon=True, reduce_cov_factor=1, realisation=None, isotropic=True):
+    def __init__(
+        self, 
+        name=None, 
+        box=None, 
+        redshift=None, # how do we want to organise this? mock name? think... 
+        min_dist=30, 
+        max_dist=200, 
+        recon=True, 
+        reduce_cov_factor=1, 
+        realisation=None, 
+        isotropic=True,
+        ):
+
+        datafile = box + "_" + redshift + "_ps.pkl"
+
         super().__init__(
-            "abacussummit_base_c000_ph000 xi_test.pkl",
+            datafile,
             name=name,
             min_dist=min_dist,
             max_dist=max_dist,
