@@ -17,8 +17,9 @@ class PowerSpectrum_AbacusSummit(PowerSpectrum):
         min_k=0.0025,
         max_k=0.8,
         step_size=1,
-        recon='iso', #when we do use recon, is it iso or aniso? 
-        recon_nrandom=None,
+        recon=True, #when we do use recon, is it iso or aniso? 
+        field_type = None, #all_A, all_Ard, or tracer, tracer_rd.
+        hod_recon_model=None,
         reduce_cov_factor=1,
         num_mocks=None,
         postprocess=None,
@@ -28,7 +29,9 @@ class PowerSpectrum_AbacusSummit(PowerSpectrum):
         fit_poles=(0,), #what about quadrupole? 
     ):
 
-        datafile = box + "_" + redshift + "_" + recon_nrandom + "_allA_ps.pkl"
+        if field_type not in ["all_A", "all_A_rd", "ELG", "ELG_rd", "LRG", "LRG_rd"]:
+            raise ValueError
+        datafile = f"/abacussummit/{redshift}/{box}/{field_type}/{box}_{redshift}_{field_type}_{hod_recon_model}_ps.pkl"
 
         super().__init__(
             datafile, 
@@ -45,7 +48,6 @@ class PowerSpectrum_AbacusSummit(PowerSpectrum):
             isotropic=isotropic,
             fit_poles=fit_poles,
         )
-
 
 
 class PowerSpectrum_SDSS_DR12(PowerSpectrum):

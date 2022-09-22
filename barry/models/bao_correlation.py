@@ -1,5 +1,6 @@
 from functools import lru_cache
 import numpy as np
+import pdb
 
 from barry.cosmology.pk2xi import PowerToCorrelationGauss
 from barry.cosmology.power_spectrum_smoothing import validate_smooth_method, smooth
@@ -24,6 +25,7 @@ class CorrelationFunctionFit(Model):
         isotropic=True,
         poly_poles=(0, 2),
         marg=None,
+        fix_bs_to_b0=False
     ):
 
         """Generic correlation function model
@@ -44,6 +46,10 @@ class CorrelationFunctionFit(Model):
         self.parent = PowerSpectrumFit(
             fix_params=fix_params, smooth_type=smooth_type, correction=correction, isotropic=isotropic, marg=marg
         )
+        self.fix_bs_to_b0=fix_bs_to_b0
+
+        assert marg is not (self.no_poly or self.fix_bs_to_b0)
+
         self.poly_poles = poly_poles
         self.smooth_type = smooth_type.lower()
         if not validate_smooth_method(smooth_type):
@@ -79,7 +85,7 @@ class CorrelationFunctionFit(Model):
         self.set_bias(data[0])
         self.parent.set_data(data, parent=True)
 
-    def set_bias(self, data, sval=50.0, width=0.3):
+    def set_bias(self, data, sval=50.0, width=0.4): #NAM: used to be width=0.3 
         """Sets the bias default value by comparing the data monopole and linear model
 
         Parameters
@@ -90,7 +96,7 @@ class CorrelationFunctionFit(Model):
             The value of k at which to perform the comparison. Default 0.2
 
         """
-
+        # pdb.set_trace()
         c = data["cosmology"]
         dataxi = splev(sval, splrep(data["dist"], data["xi0"]))
         cambpk = self.camb.get_data(om=c["om"], h0=c["h0"])
@@ -102,19 +108,31 @@ class CorrelationFunctionFit(Model):
             min_b, max_b = (1.0 - width) * b, (1.0 + width) * b
             self.set_default(f"b{{{0}}}", b ** 2, min=min_b ** 2, max=max_b ** 2)
             self.logger.info(f"Setting default bias to b0={b:0.5f} with {width:0.5f} fractional width")
+
         if self.param_dict.get("beta") is not None:
-            beta, beta_min, beta_max = f / b, (1.0 - width) * f / b, (1.0 + width) * f / b
-            self.set_default("beta", beta, beta_min, beta_max)
-            self.logger.info(f"Setting default RSD parameter to beta={beta:0.5f} with {width:0.5f} fractional width")
+            if not self.recon:
+                beta, beta_min, beta_max = f / b, (1.0 - width) * f / b, (1.0 + width) * f / b
+                self.set_default("beta", beta, beta_min, beta_max)
+                self.logger.info(f"Pre-recon, so setting default RSD parameter to beta={beta:0.5f} with {width:0.5f} fractional width and bias {b}")
+            else:
+                self.logger.info(f"Post-recon, so keeping RSD parameter beta at default value and setting default bias {b}.")
+
 
     def declare_parameters(self):
         """ Defines model parameters, their bounds and default value. """
         self.add_param("om", r"$\Omega_m$", 0.1, 0.5, 0.31)  # Cosmology
         self.add_param("alpha", r"$\alpha$", 0.8, 1.2, 1.0)  # Stretch for monopole
+        # self.add_param("alpha", r"$\alpha$", 0.9999999, 1.0000001, 1.0)  # Stretch for monopole
         if not self.isotropic:
             self.add_param("epsilon", r"$\epsilon$", -0.2, 0.2, 0.0)  # Stretch for multipoles
-        for pole in self.poly_poles:
-            self.add_param(f"b{{{pole}}}", f"$b{{{pole}}}$", 0.01, 10.0, 1.0)  # Linear galaxy bias for each multipole
+            # self.add_param("epsilon", r"$\epsilon$", -0.0000001, 0.0000001, 0.0)  # Stretch for multipoles
+        if self.fix_bs_to_b0:
+            assert 0 in self.poly_poles
+            self.add_param(f"b{{0}}", f"$b{{0}}$", 0.01, 10.0, 1.0)  # Linear galaxy bias for all multipoles
+        else: 
+            for pole in self.poly_poles:
+                self.add_param(f"b{{{pole}}}", f"$b{{{pole}}}$", 0.01, 10.0, 1.0)  # Linear galaxy bias for each multipole
+            
 
     @lru_cache(maxsize=32)
     def get_sprimefac(self, epsilon):
@@ -182,8 +200,8 @@ class CorrelationFunctionFit(Model):
             muprime = self.get_muprime(epsilon)
 
             xi0 = splev(sprime, splrep(dist, self.pk2xi_0.__call__(ks, pks[0], dist)))
-            xi2 = splev(sprime, splrep(dist, self.pk2xi_2.__call__(ks, pks[1], dist)))
-            xi4 = splev(sprime, splrep(dist, self.pk2xi_4.__call__(ks, pks[2], dist)))
+            xi2 = splev(sprime, splrep(dist, self.pk2xi_2.__call__(ks, pks[2], dist)))
+            xi4 = splev(sprime, splrep(dist, self.pk2xi_4.__call__(ks, pks[4], dist)))
 
             xi2d = xi0 + 0.5 * (3.0 * muprime ** 2 - 1) * xi2 + 0.125 * (35.0 * muprime ** 4 - 30.0 * muprime ** 2 + 3.0) * xi4
 
@@ -192,7 +210,7 @@ class CorrelationFunctionFit(Model):
 
         return sprime, xi
 
-    def compute_correlation_function(self, dist, p, smooth=False):
+    def compute_correlation_function(self, dist, p, smooth=False, plotting=False):
         """Computes the correlation function model using the Beutler et. al., 2017 power spectrum
             and 3 bias parameters but no polynomial terms
 
@@ -215,6 +233,7 @@ class CorrelationFunctionFit(Model):
             the additive terms in the model, necessary for analytical marginalisation
 
         """
+        # pdb.set_trace()
         sprime, xi_comp = self.compute_basic_correlation_function(dist, p, smooth=smooth)
         xi, poly = self.add_zero_poly(dist, p, xi_comp)
 
@@ -243,6 +262,9 @@ class CorrelationFunctionFit(Model):
 
         """
 
+        print("Are you sure you're supposed to be in bao_correlation:add_zero_poly?")
+        pdb.set_trace() 
+
         xi0, xi2, xi4 = xi_comp
         xi = [np.zeros(len(dist)), np.zeros(len(dist)), np.zeros(len(dist))]
 
@@ -251,30 +273,41 @@ class CorrelationFunctionFit(Model):
             poly = np.zeros((1, len(dist)))
         else:
             xi[0] = p["b{0}"] * xi0
-            xi[1] = 2.5 * (p["b{2}"] * xi2 - xi[0])
-            if 4 in self.poly_poles:
-                xi[2] = 1.125 * (p["b{4}"] * xi4 - 10.0 * p["b{2}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+            if self.fix_bs_to_b0:
+                xi[1] = 2.5 * (p["b{0}"] * xi2 - xi[0])
             else:
-                xi[2] = 1.125 * (xi4 - 10.0 * p["b{2}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+                xi[1] = 2.5 * (p["b{2}"] * xi2 - xi[0])
+            if 4 in self.poly_poles:
+                if self.fix_bs_to_b0:
+                    xi[2] = 1.125 * (p["b{0}"] * xi4 - 10.0 * p["b{0}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+                else:
+                    xi[2] = 1.125 * (p["b{4}"] * xi4 - 10.0 * p["b{2}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+            else:
+                if self.fix_bs_to_b0:
+                    xi[2] = 1.125 * (xi4 - 10.0 * p["b{0}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+                else:
+                    xi[2] = 1.125 * (xi4 - 10.0 * p["b{2}"] * xi2 + 3.0 * p["b{0}"] * xi0)
 
             # Polynomial shape
             if self.marg:
                 xi_marg = [xi0, 2.5 * xi2, 1.125 * xi4]
-                poly = np.zeros((len(self.poly_poles), 3, len(dist)))
+                poly = np.zeros(( len(self.poly_poles), 3, len(dist)))
                 for npole, pole in enumerate(self.poly_poles):
-                    poly[npole, npole] = [xi_marg[npole]]
+                    # pdb.set_trace()
+                    poly[npole, npole] = xi_marg[npole] #NAM: this is what they had before [xi_marg[npole]]
                 poly[0, 1] = -2.5 * xi0
                 poly[0, 2] = 1.125 * 3.0 * xi0
                 if 2 in self.poly_poles:
-                    poly[4, 2] = -1.125 * 10.0 * xi2
+                    poly[1, 2] = -1.125 * 10.0 * xi2 #NAM: used to be poly[4,2] but here we're not adding 4 sequences per poly_pole, since no polynomial terms.
 
                 xi = [np.zeros(len(dist)), np.zeros(len(dist)), np.zeros(len(dist))]
             else:
                 poly = np.zeros((1, 3, len(dist)))
+    
 
         return xi, poly
 
-    def add_three_poly(self, dist, p, xi_comp):
+    def add_three_poly(self, dist, p, xi_comp, plotting=False):
         """Converts the xi components to a full model but with 3 polynomial terms for each multipole
 
         Parameters
@@ -310,14 +343,25 @@ class CorrelationFunctionFit(Model):
 
         else:
             xi[0] = p["b{0}"] * xi0
-            xi[1] = 2.5 * (p["b{2}"] * xi2 - xi[0])
-            if 4 in self.poly_poles:
-                xi[2] = 1.125 * (p["b{4}"] * xi4 - 10.0 * p["b{2}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+            if self.fix_bs_to_b0:
+                xi[1] = 2.5 * (p["b{0}"] * xi2 - xi[0])
             else:
-                xi[2] = 1.125 * (xi4 - 10.0 * p["b{2}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+                xi[1] = 2.5 * (p["b{2}"] * xi2 - xi[0])
+
+            if 4 in self.poly_poles:
+                if self.fix_bs_to_b0:
+                    xi[2] = 1.125 * (p["b{0}"] * xi4 - 10.0 * p["b{0}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+                else:
+                    xi[2] = 1.125 * (p["b{4}"] * xi4 - 10.0 * p["b{2}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+            else:
+                if self.fix_bs_to_b0:
+                    xi[2] = 1.125 * (xi4 - 10.0 * p["b{0}"] * xi2 + 3.0 * p["b{0}"] * xi0)
+                else:
+                    xi[2] = 1.125 * (xi4 - 10.0 * p["b{2}"] * xi2 + 3.0 * p["b{0}"] * xi0)
 
             # Polynomial shape
             if self.marg:
+
                 xi_marg = [xi0, 2.5 * xi2, 1.125 * xi4]
                 poly = np.zeros((4 * len(self.poly_poles), 3, len(dist)))
                 for npole, pole in enumerate(self.poly_poles):
@@ -335,7 +379,7 @@ class CorrelationFunctionFit(Model):
 
         return xi, poly
 
-    def get_model(self, p, d, smooth=False):
+    def get_model(self, p, d, smooth=False, plotting=False):
         """Gets the model prediction using the data passed in and parameter location specified
 
         Parameters
@@ -357,7 +401,7 @@ class CorrelationFunctionFit(Model):
             k values correspond to d['dist']
         """
 
-        dist, xis, poly = self.compute_correlation_function(d["dist"], p, smooth=smooth)
+        dist, xis, poly = self.compute_correlation_function(d["dist"], p, smooth=smooth, plotting=plotting)
 
         xi_model = xis[0] if self.isotropic else np.concatenate([xis[0], xis[1]])
         if 4 in d["poles"] and not self.isotropic:
@@ -401,6 +445,13 @@ class CorrelationFunctionFit(Model):
 
         xi_model, poly_model = self.get_model(p, d, smooth=self.smooth)
 
+        # pdb.set_trace()
+
+        # try:
+        #     print("bao_correlation:407 get_likelihood(). b0, b2, beta: ", p["b{0}"], p["b{2}"], p["beta"])
+        # except KeyError:
+        #     print("bao_correlation:407 get_likelihood(). b0, beta: ", p["b{0}"], p["beta"])            
+
         if self.isotropic:
             xi_model_fit = xi_model
             poly_model_fit = poly_model
@@ -440,14 +491,17 @@ class CorrelationFunctionFit(Model):
                 d["xi"], xi_model_fit, np.zeros(xi_model_fit.shape), d["icov"], [None], num_mocks=num_mocks, num_params=num_params
             )
 
-    def plot(self, params, smooth_params=None, figname=None, title=None):
+    def plot(self, params, smooth_params=None, figname=None, title=None, plt_errs=True):
         self.logger.info("Create plot")
         import matplotlib.pyplot as plt
 
         # Ensures we plot the window convolved model
         ss = self.data[0]["dist"]
         err = np.sqrt(np.diag(self.data[0]["cov"]))
-        mod, polymod = self.get_model(params, self.data[0])
+        
+        # pdb.set_trace()
+
+        mod, polymod = self.get_model(params, self.data[0], plotting=True)
         if smooth_params is not None:
             smooth, polysmooth = self.get_model(smooth_params, self.data[0], smooth=True)
         else:
@@ -477,7 +531,9 @@ class CorrelationFunctionFit(Model):
             mod = mod + bband @ polymod
             mod_fit = mod_fit + bband @ polymod_fit
 
-            print(len(self.get_active_params()) + len(bband))
+            # pdb.set_trace()
+
+            #print(len(self.get_active_params()) + len(bband))
             print(f"Maximum likelihood nuisance parameters at maximum a posteriori point are {bband}")
             new_chi_squared = self.get_chi2_likelihood(
                 self.data[0]["xi"],
@@ -489,8 +545,9 @@ class CorrelationFunctionFit(Model):
                 num_params=len(self.get_active_params()) + len(bband),
             )
             alphas = params["alpha"] if self.isotropic else self.get_alphas(params["alpha"], params["epsilon"])
+
             dof = len(self.data[0]["xi"]) - len(self.get_active_params()) - len(bband)
-            print(-2.0 * new_chi_squared, dof, alphas)
+            #print(-2.0 * new_chi_squared, dof, alphas)
 
             bband_smooth = self.get_ML_nuisance(
                 self.data[0]["xi"],
@@ -501,7 +558,10 @@ class CorrelationFunctionFit(Model):
                 self.data[0]["icov"],
                 [None],
             )
-            smooth = smooth + bband_smooth @ polysmooth
+
+            # smooth = smooth + bband_smooth @ polysmooth
+            print("hacky mchack")
+            smooth = smooth + bband @ polysmooth
         else:
             dof = len(self.data[0]["xi"]) - len(self.get_active_params())
             new_chi_squared = 0.0
@@ -525,15 +585,26 @@ class CorrelationFunctionFit(Model):
         fig, axes = plt.subplots(figsize=(9, height), nrows=num_rows, ncols=2, sharex=True, squeeze=False)
         ratio = (height - 1) / height
         plt.subplots_adjust(left=0.1, top=ratio, bottom=0.05, right=0.85, hspace=0, wspace=0.3)
+
+        # pdb.set_trace()
+
         for ax, err, mod, smooth, name, label, c in zip(axes, errs, mods, smooths, names, labels, cs):
 
-            # Plot ye old data
-            ax[0].errorbar(ss, ss ** 2 * self.data[0][name], yerr=ss ** 2 * err, fmt="o", ms=4, label="Data", c=c)
-            ax[1].errorbar(ss, ss ** 2 * (self.data[0][name] - smooth), yerr=ss ** 2 * err, fmt="o", ms=4, label="Data", c=c)
+            yerr = ss ** 2 * err if plt_errs else np.full_like(ss,0.001)
 
-            # Plot ye old model
+            # pdb.set_trace()
+
+            # Plot ye olde data
+            ax[0].errorbar(ss, ss ** 2 * self.data[0][name], yerr=yerr, fmt="o", ms=4, label="Data", c=c)
+            ax[1].errorbar(ss, ss ** 2 * (self.data[0][name] - smooth), yerr=yerr, fmt="o", ms=4, label="Data", c=c)
+
+            # Plot ye olde model
             ax[0].plot(ss, ss ** 2 * mod, c=c, label="Model")
             ax[1].plot(ss, ss ** 2 * (mod - smooth), c=c, label="Model")
+
+            # Plot ye olde nuisance-only (smooth) model
+            ax[0].plot(ss, ss ** 2 * smooth, c=c, linestyle='dashed', label="nuisance-only (smooth)")
+            # ax[1].plot(ss, ss ** 2 * (mod - smooth), c=c, label="nuisance-only")
 
             ax[0].set_ylabel("$s^{2} \\times $ " + label)
 
@@ -548,7 +619,12 @@ class CorrelationFunctionFit(Model):
             string += "\n"
             string += "\n".join([f"{self.param_dict[l].label}={v:0.4g}" for l, v in params.items() if l is "om"])
             string += "\n"
-            string += "\n".join([f"{self.param_dict[v].label}={bband[l-1]:0.4g}" for l, v in enumerate(self.fix_params) if v is not "om"])
+            string += "\n".join([f"{self.param_dict[v].label}={bband[l- ( len(self.fix_params) - len(bband))]:0.4g}" for l, v in enumerate(self.fix_params) if v not in ["om", "sigma_s", "beta", "sigma_nl_par", "sigma_nl_perp"]])
+            string += "\n"
+            string += "\n".join([f"{self.param_dict[l].label}={v:0.4g}" for l, v in params.items() if l in self.fix_params and l in ["sigma_s", "beta", "sigma_nl_par", "sigma_nl_perp"]])
+            # pdb.set_trace()
+
+
         else:
             string += "\n".join([f"{self.param_dict[l].label}={v:0.4g}" for l, v in params.items()])
         va = "center" if self.postprocess is None else "top"

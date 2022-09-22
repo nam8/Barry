@@ -57,7 +57,7 @@ class Optimiser(Sampler):
         res = differential_evolution(lambda *x: -log_posterior(prior_transform(*x)), bounds, tol=self.tol)
 
         ps = prior_transform(res.x)
-        print(res.fun, ps)
+        #print(res.fun, ps)
         np.save(filename, np.concatenate([[-res.fun], ps]))
 
         return {"chain": ps, "posterior": -res.fun}

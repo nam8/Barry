@@ -11,6 +11,7 @@ from scipy.optimize import basinhopping, differential_evolution
 from enum import Enum, unique
 from dataclasses import dataclass
 from functools import lru_cache
+import pdb
 
 
 from barry.cosmology.camb_generator import Omega_m_z, getCambGenerator
@@ -121,6 +122,8 @@ class Model(ABC):
         if self.cosmology != c:
             mnu = c.get("mnu", 0.0)
             c["mnu"] = mnu
+
+            # dummy = c  # for PDB debugging, b/c 'c' continues. 
             self.camb = getCambGenerator(
                 h0=c["h0"], ob=c["ob"], redshift=c["z"], ns=c["ns"], mnu=c["mnu"], recon_smoothing_scale=c["reconsmoothscale"]
             )
@@ -206,16 +209,19 @@ class Model(ABC):
         """ Gets a list of (min, max) extents for all active parameters """
         return [(x.min, x.max) for x in self.get_active_params()]
 
-    def get_prior(self, params):
+    def get_prior(self, params, prior_type='flat'):
         """The prior, implemented as a flat prior by default.
 
         Used by the Ensemble and MH samplers, but not by nested sampling methods.
 
         """
-        for pname, val in params.items():
-            if val < self.param_dict[pname].min or val > self.param_dict[pname].max:
-                return -np.inf
-        return 0
+        if prior_type is 'flat':
+            for pname, val in params.items():
+                if val < self.param_dict[pname].min or val > self.param_dict[pname].max:
+                    return -np.inf
+            return 0
+
+        # elif prior_type is 'Gaussian'
 
     def get_chi2_likelihood(self, data, model, model_odd, icov, icov_m_w, num_mocks=None, num_params=None):
         """Computes the chi2 corrected likelihood.
@@ -398,7 +404,6 @@ class Model(ABC):
                 + 2.0 * marg_model @ icov_m_w[3] @ marg_model_odd.T
                 + marg_model @ icov_m_w[4] @ marg_model.T
             )
-            # print(F2)
             F2inv = np.linalg.inv(F2)
 
         bband = F2inv @ F11
@@ -609,11 +614,11 @@ class Model(ABC):
         self.plot(params)
 
     @abstractmethod
-    def plot(self, params, smooth_params=None, figname=None):
+    def plot(self, params, smooth_params=None, figname=None, plt_errs = True):
         """ Plots the predictions given some input parameter dictionary. """
         pass
 
-    def sanity_check(self, dataset, niter=200, maxiter=10000, figname=None, plot=True):
+    def sanity_check(self, dataset, niter=200, maxiter=10000, figname=None, plot=True, plt_errs = True):
         import timeit
 
         print(f"Using dataset {str(dataset)}")
@@ -635,12 +640,14 @@ class Model(ABC):
 
         print("Starting model optimisation. This may take some time.")
         p, minv = self.optimize()
-
+        
         print(f"Model optimisation with value {minv:0.3f} has parameters are {dict(p)}")
 
         if plot:
             print("Plotting model and data")
-            self.plot(p, figname=figname)
+            self.plot(p, figname=figname, plt_errs = plt_errs)
+
+        return minv, p
 
 
 if __name__ == "__main__":

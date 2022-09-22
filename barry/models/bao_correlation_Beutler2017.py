@@ -1,5 +1,5 @@
 import logging
-import sys
+import sys, pdb
 
 sys.path.append("../..")
 
@@ -23,8 +23,11 @@ class CorrBeutler2017(CorrelationFunctionFit):
         isotropic=True,
         poly_poles=(0, 2),
         marg=None,
+        tracer=None,
+        no_poly=False,
+        fix_bs_to_b0=False
     ):
-
+        self.tracer = tracer
         self.recon = False
         self.recon_type = "None"
         if recon is not None:
@@ -35,6 +38,11 @@ class CorrBeutler2017(CorrelationFunctionFit):
                 self.recon = True
 
         self.recon_smoothing_scale = None
+        self.no_poly = no_poly
+        self.fix_bs_to_b0 = fix_bs_to_b0
+
+        assert marg is not (self.no_poly or self.fix_bs_to_b0)
+
         if isotropic:
             poly_poles = [0]
         if marg is not None:
@@ -42,6 +50,10 @@ class CorrBeutler2017(CorrelationFunctionFit):
             for pole in poly_poles:
                 fix_params.extend([f"b{{{pole}}}"])
                 fix_params.extend([f"a{{{pole}}}_1", f"a{{{pole}}}_2", f"a{{{pole}}}_3"])
+
+
+                    
+
         super().__init__(
             name=name,
             fix_params=fix_params,
@@ -51,6 +63,7 @@ class CorrBeutler2017(CorrelationFunctionFit):
             isotropic=isotropic,
             poly_poles=poly_poles,
             marg=marg,
+            fix_bs_to_b0=fix_bs_to_b0,
         )
         self.parent = PowerBeutler2017(
             fix_params=fix_params,
@@ -68,21 +81,59 @@ class CorrBeutler2017(CorrelationFunctionFit):
                 self.set_default(f"a{{{pole}}}_2", 0.0)
                 self.set_default(f"a{{{pole}}}_3", 0.0)
 
+
     def declare_parameters(self):
         super().declare_parameters()
-        self.add_param("sigma_s", r"$\Sigma_s$", 0.01, 20.0, 10.0)  # Fingers-of-god damping
-        if self.isotropic:
-            self.add_param("sigma_nl", r"$\Sigma_{nl}$", 0.01, 20.0, 10.0)  # BAO damping
-        else:
-            self.add_param("beta", r"$\beta$", 0.01, 4.0, 0.5)  # RSD parameter f/b
-            self.add_param("sigma_nl_par", r"$\Sigma_{nl,||}$", 0.01, 20.0, 8.0)  # BAO damping parallel to LOS
-            self.add_param("sigma_nl_perp", r"$\Sigma_{nl,\perp}$", 0.01, 20.0, 4.0)  # BAO damping perpendicular to LOS
-        for pole in self.poly_poles:
-            self.add_param(f"a{{{pole}}}_1", f"$a_{{{pole},1}}$", -100.0, 100.0, 0)  # Monopole Polynomial marginalisation 1
-            self.add_param(f"a{{{pole}}}_2", f"$a_{{{pole},2}}$", -2.0, 2.0, 0)  # Monopole Polynomial marginalisation 2
-            self.add_param(f"a{{{pole}}}_3", f"$a_{{{pole},3}}$", -0.2, 0.2, 0)  # Monopole Polynomial marginalisation 3
+        if 'ELG' in self.tracer:
+            print("ELG sigma_s 2")
+            self.add_param("sigma_s", r"$\Sigma_s$", 1.5, 2.5, 2.0)  # Fingers-of-god damping
+            # self.add_param("sigma_s", r"$\Sigma_s$", 0.01, 10.0, 0.0)  # Fingers-of-god damping
+        elif 'LRG' in self.tracer: 
+            print("LRG sigma_s 3.0")
+            self.add_param("sigma_s", r"$\Sigma_s$", 2.5, 3.5, 3.0)  # Fingers-of-god damping
+            # self.add_param("sigma_s", r"$\Sigma_s$", 0.01, 10.0, 0.0)  # Fingers-of-god damping
 
-    def compute_correlation_function(self, dist, p, smooth=False):
+
+        if self.isotropic:
+            self.add_param("sigma_nl", r"$\Sigma_{nl}$", 0.01, 12.0, 10.0)  # BAO damping
+        else:
+            # if self.recon:
+            #     self.add_param("beta", r"$\beta$", -0.5, 0.5, 0.0)  # RSD parameter f/b
+            #     self.add_param("sigma_nl_par", r"$\Sigma_{nl,||}$", 0.01, 6.0, 4.0)  # BAO damping parallel to LOS 
+            #     self.add_param("sigma_nl_perp", r"$\Sigma_{nl,\perp}$", 0.01, 5.0, 2.5)  # BAO damping perpendicular to LOS
+            # else:
+            #     self.add_param("beta", r"$\beta$", 0.01, 4.0, 0.2)  # RSD parameter f/b
+            #     self.add_param("sigma_nl_par", r"$\Sigma_{nl,||}$", 0.01, 8.0, 6.0)  # BAO damping parallel to LOS
+            #     self.add_param("sigma_nl_perp", r"$\Sigma_{nl,\perp}$", 0.01, 4.0, 3)  # BAO damping perpendicular to LOS
+            if self.recon:
+                self.add_param("beta", r"$\beta$", -0.5, 0.5, 0.0)  # RSD parameter f/b
+                self.add_param("sigma_nl_par", r"$\Sigma_{nl,||}$", 0.01, 6.0, 4.0)  # BAO damping parallel to LOS 
+                self.add_param("sigma_nl_perp", r"$\Sigma_{nl,\perp}$", 0.01, 5.0, 2.5)  # BAO damping perpendicular to LOS
+            else:
+                self.add_param("beta", r"$\beta$", 0.01, 4.0, 0.2)  # RSD parameter f/b
+                self.add_param("sigma_nl_par", r"$\Sigma_{nl,||}$", 0.01, 8.0, 6.0)  # BAO damping parallel to LOS
+                self.add_param("sigma_nl_perp", r"$\Sigma_{nl,\perp}$", 0.01, 4.0, 3.0)  # BAO damping perpendicular to LOS
+           
+        for pole in self.poly_poles:
+            if not self.fix_bs_to_b0:
+                self.add_param(f"b{{{pole}}}", r"$b$", 0.1, 10.0, 1.0)  # Galaxy bias
+            if self.no_poly:
+                self.add_param(f"a{{{pole}}}_1", f"$a_{{{pole},1}}$", 0, 0, 0)  # Monopole Polynomial marginalisation 1
+                self.add_param(f"a{{{pole}}}_2", f"$a_{{{pole},2}}$", 0, 0, 0)  # Monopole Polynomial marginalisation 2
+                self.add_param(f"a{{{pole}}}_3", f"$a_{{{pole},3}}$", 0, 0, 0)  # Monopole Polynomial marginalisation 3
+            else: 
+                self.add_param(f"a{{{pole}}}_1", f"$a_{{{pole},1}}$", -100.0, 100.0, 0)  # Monopole Polynomial marginalisation 1
+                self.add_param(f"a{{{pole}}}_2", f"$a_{{{pole},2}}$", -2.0, 2.0, 0)  # Monopole Polynomial marginalisation 2
+                self.add_param(f"a{{{pole}}}_3", f"$a_{{{pole},3}}$", -0.2, 0.2, 0)  # Monopole Polynomial marginalisation 3
+                
+        if self.fix_bs_to_b0 and 0 in self.poly_poles:
+            self.add_param(f"b{{0}}", r"$b$", 0.1, 10.0, 1.0)  # Galaxy bias
+
+        # pdb.set_trace()
+        for p in self.params:
+            print(f"\tSetting {p.name}: {p.min}-{p.max}, default: {p.default}")
+
+    def compute_correlation_function(self, dist, p, smooth=False, plotting=False):
         """Computes the correlation function model using the Beutler et. al., 2017 power spectrum
             and 3 bias parameters and polynomial terms per multipole
 
@@ -105,8 +156,8 @@ class CorrBeutler2017(CorrelationFunctionFit):
             the additive terms in the model, necessary for analytical marginalisation
 
         """
-        sprime, xi_comp = self.compute_basic_correlation_function(dist, p, smooth=smooth)
-        xi, poly = self.add_three_poly(dist, p, xi_comp)
+        sprime, xi_comp = self.compute_basic_correlation_function(dist, p, smooth=smooth)    
+        xi, poly = self.add_three_poly(dist, p, xi_comp, plotting=plotting)
 
         return sprime, xi, poly
 

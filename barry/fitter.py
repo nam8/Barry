@@ -1,4 +1,4 @@
-import logging
+import logging, pdb
 import os
 import shutil
 import socket
@@ -151,17 +151,26 @@ class Fitter(object):
     def _run_fit(self, model_index, walker_index):
         model = self.model_datasets[model_index][0]
         data = self.model_datasets[model_index][1]
+        name = self.model_datasets[model_index][2]["name"]
 
         model.set_data(data)
-        uid = f"chain_{model_index}_{walker_index}"
+        uid = f"chain_{name}_{model_index}_{walker_index}"
 
         sampler = self.get_sampler()
 
-        self.logger.info("Running fitting job, saving to %s" % self.temp_dir)
+        self.logger.info("Running fitting job, saving to %s" % (self.temp_dir + "/" + uid))
         self.logger.info(f"\tModel is {model}")
         self.logger.info(f"\tData is {' '.join([d['name'] for d in self.model_datasets[model_index][1]])}")
-        sampler.fit(model.get_posterior, model.get_start, model.get_num_dim(), model.unscale, uid=uid, save_dims=self.save_dims)
+        res = sampler.fit(model.get_posterior, model.get_start, model.get_num_dim(), model.unscale, uid=uid, save_dims=self.save_dims)
+#        pdb.set_trace() 
+        try:
+            params = model.get_param_dict(list(res["chain"][0]))
+        except TypeError:
+            params =  model.get_param_dict(list(res["chain"]))
+
+        model.plot(params, figname=(self.temp_dir + "/" + "plot" + uid.split("chain")[1] +".png"))
         self.logger.info("Finished sampling")
+	
 
     def is_local(self):
         return shutil.which(get_config()["hpc_determining_command"]) is None
@@ -179,14 +188,13 @@ class Fitter(object):
         self.logger.info(f"With {num_models} models+datasets and {self.num_walkers} walkers, " f"have {num_jobs} jobs")
 
         if self.is_local():
-            # Only do the first model+dataset on a local computer as a test
             self.logger.info("Running locally on all indices.")
 
             for mi in range(num_models):
                 for wi in range(self.num_walkers):
                     self.logger.info("Running model_dataset %d, walker number %d" % (mi, wi))
                     self._run_fit(mi, wi)
-
+                   
         else:
             if len(sys.argv) == 1:
                 # if launching the job for the first time
@@ -258,10 +266,10 @@ class Fitter(object):
         """
         self.logger.info("Loading chains")
         files = [f for f in os.listdir(self.temp_dir) if f.endswith("chain.npy")]
-        files.sort(key=lambda s: [int(s.split("_")[1]), int(s.split("_")[2])])
+        files.sort(key=lambda s: [int(s.split("_")[-4]), int(s.split("_")[-3])])
         filenames = [self.temp_dir + "/" + f for f in files]
-        model_indexes = [int(f.split("_")[1]) for f in files]
-        walker_indexes = [int(f.split("_")[2]) for f in files]
+        model_indexes = [int(f.split("_")[-4]) for f in files]
+        walker_indexes = [int(f.split("_")[-3]) for f in files]
         chains = [self._load_file(f) for f in filenames]
 
         results = []

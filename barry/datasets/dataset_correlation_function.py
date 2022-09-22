@@ -1,4 +1,4 @@
-import logging
+import logging, pdb
 
 from barry.datasets.dataset_correlation_function_abc import CorrelationFunction
 
@@ -13,13 +13,22 @@ class CorrelationFunction_AbacusSummit(CorrelationFunction):
         min_dist=30, 
         max_dist=200, 
         recon=True, 
+        recon_nrandom=None, 
+        field_type=None, 
+        hod_recon_model=None,
         reduce_cov_factor=1, 
         realisation=None, 
         isotropic=True,
+        fit_poles=(0,),
         ):
+        if field_type not in ["all_A", "all_A_rd", "ELG", "ELG_rd", "LRG", "LRG_rd"]:
+            raise ValueError
 
-        datafile = box + "_" + redshift + "_ps.pkl"
-
+        if any(pole in [1, 3] for pole in fit_poles):
+            raise NotImplementedError("Only monopole and quadrupole included in AS")
+        
+        datafile = f"/abacussummit/{redshift}/{box}/{field_type}/{box}_{redshift}_{field_type}_{hod_recon_model}_xi.pkl"
+        print(datafile)        
         super().__init__(
             datafile,
             name=name,
@@ -29,6 +38,7 @@ class CorrelationFunction_AbacusSummit(CorrelationFunction):
             reduce_cov_factor=reduce_cov_factor,
             realisation=realisation,
             isotropic=isotropic,
+            fit_poles=fit_poles,
         )
 
 
