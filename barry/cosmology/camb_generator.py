@@ -10,9 +10,18 @@ import logging
 
 
 @lru_cache(maxsize=32)
-def getCambGenerator(redshift=0.51, om_resolution=101, h0_resolution=1, h0=0.676, ob=0.04814, ns=0.97, recon_smoothing_scale=21.21):
+def getCambGenerator(
+    redshift=0.51, om_resolution=101, h0_resolution=1, h0=0.676, ob=0.04814, ns=0.97, mnu=0.0, recon_smoothing_scale=21.21
+):
     return CambGenerator(
-        redshift=redshift, om_resolution=om_resolution, h0_resolution=h0_resolution, h0=h0, ob=ob, ns=ns, recon_smoothing_scale=recon_smoothing_scale
+        redshift=redshift,
+        om_resolution=om_resolution,
+        h0_resolution=h0_resolution,
+        h0=h0,
+        ob=ob,
+        ns=ns,
+        mnu=mnu,
+        recon_smoothing_scale=recon_smoothing_scale,
     )
 
 
@@ -45,13 +54,15 @@ def E_z(omega_m, z):
 
 
 class CambGenerator(object):
-    """ An object to generate power spectra using camb and save them to file.
+    """An object to generate power spectra using camb and save them to file.
 
     Useful because computing them in a likelihood step is insanely slow.
     """
 
-    def __init__(self, redshift=0.61, om_resolution=101, h0_resolution=1, h0=0.676, ob=0.04814, ns=0.97, recon_smoothing_scale=21.21):
-        """ 
+    def __init__(
+        self, redshift=0.61, om_resolution=101, h0_resolution=1, h0=0.676, ob=0.04814, ns=0.97, mnu=0.0, recon_smoothing_scale=21.21
+    ):
+        """
         Precomputes CAMB for efficiency. Access ks via self.ks, and use get_data for an array
         of both the linear and non-linear power spectrum
         """
@@ -63,9 +74,8 @@ class CambGenerator(object):
 
         self.data_dir = os.path.normpath(os.path.dirname(inspect.stack()[0][1]) + "/../generated/")
         hh = int(h0 * 10000)
-        self.filename_unique = f"{int(self.redshift * 1000)}_{self.om_resolution}_{self.h0_resolution}_{hh}_{int(ob * 10000)}_{int(ns * 1000)}"
+        self.filename_unique = f"{int(self.redshift * 1000)}_{self.om_resolution}_{self.h0_resolution}_{hh}_{int(ob * 10000)}_{int(ns * 1000)}_{int(mnu * 10000)}"
         self.filename = self.data_dir + f"/camb_{self.filename_unique}.npy"
-
         self.k_min = 1e-4
         self.k_max = 5
         self.k_num = 2000
@@ -76,6 +86,7 @@ class CambGenerator(object):
         self.omch2s = np.linspace(0.05, 0.3, self.om_resolution)
         self.omega_b = ob
         self.ns = ns
+        self.mnu = mnu
         if h0_resolution == 1:
             self.h0s = [h0]
         else:
@@ -84,17 +95,18 @@ class CambGenerator(object):
         self.data = None
         self.logger.info(f"Creating CAMB data with {self.om_resolution} x {self.h0_resolution}")
 
-    def load_data(self, can_generate=False):
+    def load_data(self, can_generate=True):
         if not os.path.exists(self.filename):
             if not can_generate:
                 msg = "Data does not exist and this isn't the time to generate it!"
                 self.logger.error(msg)
                 raise ValueError(msg)
             else:
+                self.logger.info(f"Generating CAMB data for {self.filename}")
                 self.data = self._generate_data()
         else:
             self.data = np.load(self.filename)
-            self.logger.info("Loading existing CAMB data")
+            self.logger.info(f"Loading existing CAMB data from {self.filename}")
 
     @lru_cache(maxsize=512)
     def get_data(self, om=0.31, h0=None):
@@ -131,10 +143,10 @@ class CambGenerator(object):
                 pars.set_cosmology(
                     H0=h0 * 100,
                     omch2=omch2,
-                    mnu=0.0,
+                    mnu=self.mnu,
                     ombh2=self.omega_b * h0 * h0,
                     omk=0.0,
-                    tau=0.063,
+                    tau=0.066,
                     neutrino_hierarchy="degenerate",
                     num_massive_neutrinos=1,
                 )
@@ -161,10 +173,20 @@ class CambGenerator(object):
         """ Performs bilinear interpolation on the entire pk array """
         omch2_index = 1.0 * (self.om_resolution - 1) * (omch2 - self.omch2s[0]) / (self.omch2s[-1] - self.omch2s[0])
 
+        # If omch2 == self.omch2s[-1] we can get an index out of bounds later due to rounding errors, so we
+        # manually set the edge cases
+        if omch2 >= self.omch2s[-1]:
+            omch2_index = self.om_resolution - 1 - 1.0e-6
+
         if self.h0_resolution == 1:
             h0_index = 0
         else:
             h0_index = 1.0 * (self.h0_resolution - 1) * (h0 - self.h0s[0]) / (self.h0s[-1] - self.h0s[0])
+
+            # If h0 == self.h0s[-1] we can get an index out of bounds later due to rounding errors, so we
+            # manually set the edge cases
+            if h0 == self.h0s[-1]:
+                h0_index = self.h0_resolution - 1 - 1.0e-6
 
         x = omch2_index - np.floor(omch2_index)
         y = h0_index - np.floor(h0_index)

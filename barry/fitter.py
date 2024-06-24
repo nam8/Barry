@@ -1,4 +1,4 @@
-import logging
+import logging, pdb
 import os
 import shutil
 import socket
@@ -12,13 +12,13 @@ from barry.utils import get_hpc
 
 
 class Fitter(object):
-    """ This class manages all the model fitting you'll be doing.
+    """This class manages all the model fitting you'll be doing.
 
     You simply declare pairs of models and datasets that you want to fit,
     optionally tell it which sampler to use and then tell it do its job.
 
     Hopefully minimal fuss involved.
-    
+
     """
 
     def __init__(self, temp_dir, save_dims=None, remove_output=True):
@@ -53,7 +53,7 @@ class Fitter(object):
             self.logger.warning("OUTPUT IS NOT BEING REMOVED, BE WARNED IF THIS IS SUPPOSED TO BE A FRESH RUN")
 
     def add_model_and_dataset(self, model, dataset, **extra_args):
-        """ Adds a model-dataset pair to fit.
+        """Adds a model-dataset pair to fit.
 
         Parameters
         ----------
@@ -66,10 +66,15 @@ class Fitter(object):
             I often use this to name my pairs to make it convenient to load into `ChainConsumer`.
 
         """
+
+        if "realisation" not in extra_args:
+            extra_args["realisation"] = dataset.realisation
+        if "name" not in extra_args:
+            extra_args["name"] = dataset.get_name() + " + " + model.get_name()
         self.model_datasets.append((model, dataset.get_data(), extra_args))
 
     def set_num_concurrent(self, num_concurrent=None):
-        """ Set the number of jobs allowed to run in the job array at once.
+        """Set the number of jobs allowed to run in the job array at once.
 
         Parameters
         ----------
@@ -80,7 +85,7 @@ class Fitter(object):
         self.num_concurrent = num_concurrent
 
     def get_num_concurrent(self):
-        """ Gets the number of current jobs limit.
+        """Gets the number of current jobs limit.
 
         Returns
         -------
@@ -91,7 +96,7 @@ class Fitter(object):
         return self.num_concurrent
 
     def set_num_walkers(self, num_walkers):
-        """ Sets the number of walks for each model-dataset pair.
+        """Sets the number of walks for each model-dataset pair.
 
         Ie, how many different runs we should do for each pair to ensure convergence
         and good statistics. Setting this to 10 for the MH sampling for example would
@@ -103,8 +108,10 @@ class Fitter(object):
         """
         self.num_walkers = num_walkers
 
+        return self
+
     def get_num_jobs(self):
-        """ Gets the total number of jobs that wil be submitted.
+        """Gets the total number of jobs that wil be submitted.
 
         Returns
         -------
@@ -119,7 +126,7 @@ class Fitter(object):
         return model_index, walker_index
 
     def set_sampler(self, sampler):
-        """ Sets the sampler
+        """Sets the sampler
 
         Parameters
         ----------
@@ -128,8 +135,10 @@ class Fitter(object):
         """
         self.sampler = sampler
 
+        return self
+
     def get_sampler(self):
-        """ Returns the sampler. If not set, creates a DynestySampler
+        """Returns the sampler. If not set, creates a DynestySampler
 
         Returns
         -------
@@ -140,26 +149,34 @@ class Fitter(object):
         return self.sampler
 
     def _run_fit(self, model_index, walker_index):
-
         model = self.model_datasets[model_index][0]
         data = self.model_datasets[model_index][1]
+        name = self.model_datasets[model_index][2]["name"]
 
         model.set_data(data)
-        uid = f"chain_{model_index}_{walker_index}"
+        uid = f"chain_{name}_{model_index}_{walker_index}"
 
         sampler = self.get_sampler()
 
-        self.logger.info("Running fitting job, saving to %s" % self.temp_dir)
+        self.logger.info("Running fitting job, saving to %s" % (self.temp_dir + "/" + uid))
         self.logger.info(f"\tModel is {model}")
         self.logger.info(f"\tData is {' '.join([d['name'] for d in self.model_datasets[model_index][1]])}")
-        sampler.fit(model.get_posterior, model.get_start, model.get_num_dim(), model.unscale, uid=uid, save_dims=self.save_dims)
+        res = sampler.fit(model.get_posterior, model.get_start, model.get_num_dim(), model.unscale, uid=uid, save_dims=self.save_dims)
+#        pdb.set_trace() 
+        try:
+            params = model.get_param_dict(list(res["chain"][0]))
+        except TypeError:
+            params =  model.get_param_dict(list(res["chain"]))
+
+        model.plot(params, figname=(self.temp_dir + "/" + "plot" + uid.split("chain")[1] +".png"))
         self.logger.info("Finished sampling")
+	
 
     def is_local(self):
         return shutil.which(get_config()["hpc_determining_command"]) is None
 
     def should_plot(self):
-        # Plot if we're running on the laptop, or we've passed a -1 as the only argument
+        # Plot if we're running on the laptop, or we've passed "plot" as the argument
         # to the python script on the HPC
         return self.is_local() or (len(sys.argv) == 2 and sys.argv[1] == "plot")
 
@@ -171,9 +188,13 @@ class Fitter(object):
         self.logger.info(f"With {num_models} models+datasets and {self.num_walkers} walkers, " f"have {num_jobs} jobs")
 
         if self.is_local():
-            # Only do the first model+dataset on a local computer as a test
-            self.logger.info("Running locally on the 0th index.")
-            self._run_fit(0, 0)
+            self.logger.info("Running locally on all indices.")
+
+            for mi in range(num_models):
+                for wi in range(self.num_walkers):
+                    self.logger.info("Running model_dataset %d, walker number %d" % (mi, wi))
+                    self._run_fit(mi, wi)
+                   
         else:
             if len(sys.argv) == 1:
                 # if launching the job for the first time
@@ -221,7 +242,7 @@ class Fitter(object):
         return result
 
     def load(self, split_models=True, split_walkers=False):
-        """ Load in all the chains and fitting results
+        """Load in all the chains and fitting results
 
         Parameters
         ----------
@@ -245,10 +266,10 @@ class Fitter(object):
         """
         self.logger.info("Loading chains")
         files = [f for f in os.listdir(self.temp_dir) if f.endswith("chain.npy")]
-        files.sort(key=lambda s: [int(s.split("_")[1]), int(s.split("_")[2])])
+        files.sort(key=lambda s: [int(s.split("_")[-4]), int(s.split("_")[-3])])
         filenames = [self.temp_dir + "/" + f for f in files]
-        model_indexes = [int(f.split("_")[1]) for f in files]
-        walker_indexes = [int(f.split("_")[2]) for f in files]
+        model_indexes = [int(f.split("_")[-4]) for f in files]
+        walker_indexes = [int(f.split("_")[-3]) for f in files]
         chains = [self._load_file(f) for f in filenames]
 
         results = []

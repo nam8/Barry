@@ -6,12 +6,12 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 from numpy.random import uniform
 import numpy as np
-from scipy import integrate
-from scipy.integrate import simps
 from scipy.special import loggamma
-from scipy.optimize import basinhopping
+from scipy.optimize import basinhopping, differential_evolution
 from enum import Enum, unique
 from dataclasses import dataclass
+from functools import lru_cache
+import pdb
 
 
 from barry.cosmology.camb_generator import Omega_m_z, getCambGenerator
@@ -29,7 +29,7 @@ class Param:
 
 @unique
 class Correction(Enum):
-    """ Various corrections that we should apply when computing our likelihood.
+    """Various corrections that we should apply when computing our likelihood.
 
     NONE gives no correction.
     HARTLAP implements the chi2 correction given in Hartlap 2007
@@ -43,14 +43,14 @@ class Correction(Enum):
 
 
 class Model(ABC):
-    """ Abstract model class.
+    """Abstract model class.
 
     Implement a version of this that overwrites the `plot` and get_likelihood` methods.
 
     """
 
-    def __init__(self, name, postprocess=None, correction=None, isotropic=True):
-        """ Create a new model.
+    def __init__(self, name, postprocess=None, correction=None, isotropic=True, marg=None):
+        """Create a new model.
 
         Parameters
         ----------
@@ -85,11 +85,25 @@ class Model(ABC):
         if postprocess is not None and not self.isotropic:
             raise NotImplementedError("Postprocessing (i.e., BAOExtractor) not implemented for anisotropic fits")
         if correction is None:
-            correction = Correction.SELLENTIN
+            correction = Correction.NONE
         self.correction = correction
         self.correction_data = {}  # Empty dict to store correction specific data for speeding up computation
         assert isinstance(self.correction, Correction), "Correction should be an enum of Correction"
-        self.logger.info(f"Created model {name} of {self.__class__.__name__} with correction {correction} and postprocess {str(postprocess)}")
+        self.logger.info(
+            f"Created model {name} of {self.__class__.__name__} with correction {correction} and postprocess {str(postprocess)}"
+        )
+
+        self.marg = False
+        self.marg_type = "None"
+        if marg is not None:
+            self.marg_type = "full"
+            if marg.lower() == "partial":
+                self.marg_type = "partial"
+            self.marg = True
+            self.logger.info(f"Using {self.marg_type} analytic marginalisation")
+            assert (
+                self.correction != Correction.SELLENTIN
+            ), "ERROR: SELLENTIN covariance matrix correction not compatible with analytic marginalisation. Switch to Correction.HARTLAP or use marg=false"
 
     def get_name(self):
         return self.name
@@ -106,7 +120,13 @@ class Model(ABC):
             self.logger.info(f"Setting default growth rate of structure to f={f:0.5f}")
 
         if self.cosmology != c:
-            self.camb = getCambGenerator(h0=c["h0"], ob=c["ob"], redshift=c["z"], ns=c["ns"], recon_smoothing_scale=c["reconsmoothscale"])
+            mnu = c.get("mnu", 0.0)
+            c["mnu"] = mnu
+
+            # dummy = c  # for PDB debugging, b/c 'c' continues. 
+            self.camb = getCambGenerator(
+                h0=c["h0"], ob=c["ob"], redshift=c["z"], ns=c["ns"], mnu=c["mnu"], recon_smoothing_scale=c["reconsmoothscale"]
+            )
             self.set_default("om", c["om"])
             self.pregen_path = os.path.abspath(os.path.join(self.data_location, self.get_unique_cosmo_name()))
             self.cosmology = c
@@ -114,7 +134,7 @@ class Model(ABC):
                 self._load_precomputed_data()
 
     def set_data(self, data):
-        """ Sets the models data, including fetching the right cosmology and PT generator.
+        """Sets the models data, including fetching the right cosmology and PT generator.
 
         Note that if you pass in multiple datas (ie a list with more than one element),
         they need to have the same cosmology and must all be isotropic or anisotropic
@@ -161,9 +181,13 @@ class Model(ABC):
         """ Returns the default value of a given parameter name """
         return self.param_dict[name].default
 
-    def set_default(self, name, default):
+    def set_default(self, name, default, min=None, max=None):
         """ Sets the default value for a parameter """
         self.param_dict[name].default = default
+        if min is not None:
+            self.param_dict[name].min = min
+        if max is not None:
+            self.param_dict[name].max = max
 
     def get_defaults(self):
         """ Returns a list of default values for all active parameters """
@@ -185,19 +209,22 @@ class Model(ABC):
         """ Gets a list of (min, max) extents for all active parameters """
         return [(x.min, x.max) for x in self.get_active_params()]
 
-    def get_prior(self, params):
-        """ The prior, implemented as a flat prior by default.
+    def get_prior(self, params, prior_type='flat'):
+        """The prior, implemented as a flat prior by default.
 
         Used by the Ensemble and MH samplers, but not by nested sampling methods.
 
         """
-        for pname, val in params.items():
-            if val < self.param_dict[pname].min or val > self.param_dict[pname].max:
-                return -np.inf
-        return 0
+        if prior_type is 'flat':
+            for pname, val in params.items():
+                if val < self.param_dict[pname].min or val > self.param_dict[pname].max:
+                    return -np.inf
+            return 0
 
-    def get_chi2_likelihood(self, diff, icov, num_mocks=None, num_params=None):
-        """ Computes the chi2 corrected likelihood.
+        # elif prior_type is 'Gaussian'
+
+    def get_chi2_likelihood(self, data, model, model_odd, icov, icov_m_w, num_mocks=None, num_params=None):
+        """Computes the chi2 corrected likelihood.
 
         Parameters
         ----------
@@ -215,18 +242,38 @@ class Model(ABC):
         log_likelihood : float
             The (corrected) log-likelihood value from the computed chi2.
         """
-        chi2 = diff.T @ icov @ diff
+
+        if icov_m_w[0] is None:
+            diff = data - (model + model_odd)
+            chi2 = diff.T @ icov @ diff
+        else:
+            chi2 = (
+                data.T @ icov @ data
+                - 2.0 * model_odd.T @ icov_m_w[0] @ data
+                - 2.0 * model.T @ icov_m_w[1] @ data
+                + model_odd.T @ icov_m_w[2] @ model_odd
+                + 2.0 * model.T @ icov_m_w[3] @ model_odd
+                + model.T @ icov_m_w[4] @ model.T
+            )
 
         if self.correction in [Correction.HARTLAP, Correction.SELLENTIN]:
-            assert num_mocks > 0, "Cannot use HARTLAP  or SELLENTIN correction with covariance not determined from mocks. Set correction to Correction.NONE"
+            assert (
+                num_mocks > 0
+            ), "Cannot use HARTLAP  or SELLENTIN correction with covariance not determined from mocks. Set correction to Correction.NONE"
+            assert (
+                num_mocks > 1
+            ), "Cannot use HARTLAP  or SELLENTIN correction with only one mock. Set correction to Correction.NONE"
+        
         if self.correction is Correction.HARTLAP:  # From Hartlap 2007
-            chi2 *= (num_mocks - diff.shape - 2) / (num_mocks - 1)
+            chi2 *= (num_mocks - len(data) - 2) / (num_mocks - 1)
 
         if self.correction is Correction.SELLENTIN:  # From Sellentin 2016
             key = f"{num_mocks}_{num_params}"
             if key not in self.correction_data:
                 self.correction_data[key] = (
-                    loggamma(num_mocks / 2).real - (num_params / 2) * np.log(np.pi * (num_mocks - 1)) - loggamma((num_mocks - num_params) * 0.5).real
+                    loggamma(num_mocks / 2).real
+                    - (num_params / 2) * np.log(np.pi * (num_mocks - 1))
+                    - loggamma((num_mocks - num_params) * 0.5).real
                 )
             c_p = self.correction_data[key]
             log_likelihood = c_p - (num_mocks / 2) * np.log(1 + chi2 / (num_mocks - 1))
@@ -234,9 +281,173 @@ class Model(ABC):
         else:
             return -0.5 * chi2
 
-    @abstractmethod
-    def get_likelihood(self, params, data):
-        raise NotImplementedError("You need to set your likelihood")
+    def get_chi2_marg_likelihood(self, data, model, model_odd, marg_model, marg_model_odd, icov, icov_m_w, num_mocks=None):
+        """Computes the chi2 corrected likelihood.
+
+        Parameters
+        ----------
+        model : np.ndarray
+            The model predictions without any nuisance parameters
+        marg_model : np.ndarray
+            The parts of the model that depend on nuisance parameters
+        data : np.ndarray
+            The data vector
+        icov : np.ndarray
+            Inverted covariance matrix.
+        num_mocks : int, optional
+            The number of mocks used to estimate the covariance. Used for corrections.
+        num_params : int, optional
+            The number of parameters in the model. Used for corrections.
+
+        Returns
+        -------
+        log_likelihood : float
+            The (corrected) log-likelihood value from the computed chi2.
+        """
+        if icov_m_w[0] is None:
+            model += model_odd
+            marg_model += marg_model_odd
+            diff = data - model
+            F02 = diff @ icov @ diff
+            F11 = marg_model @ icov @ diff
+            F2 = marg_model @ icov @ marg_model.T
+            F2inv = np.linalg.inv(F2)
+        else:
+            F02 = (
+                data @ icov @ data
+                - 2.0 * model_odd @ icov_m_w[0] @ data
+                - 2.0 * model @ icov_m_w[1] @ data
+                + model_odd @ icov_m_w[2] @ model_odd
+                + 2.0 * model @ icov_m_w[3] @ model_odd
+                + model @ icov_m_w[4] @ model
+            )
+            F11 = (
+                marg_model_odd @ icov_m_w[0] @ data
+                + marg_model @ icov_m_w[1] @ data
+                - marg_model_odd @ icov_m_w[2] @ model_odd
+                - marg_model @ icov_m_w[3] @ model_odd
+                - marg_model_odd @ icov_m_w[3].T @ model
+                - marg_model @ icov_m_w[4] @ model
+            )
+            F2 = (
+                marg_model_odd @ icov_m_w[2] @ marg_model_odd.T
+                + marg_model @ icov_m_w[3] @ marg_model_odd.T
+                + marg_model_odd @ icov_m_w[3].T @ marg_model.T
+                + marg_model @ icov_m_w[4] @ marg_model.T
+            )
+            F2inv = np.linalg.inv(F2)
+        chi2 = F02 - F11 @ F2inv @ F11
+
+        if self.correction in [Correction.HARTLAP]:
+            assert (
+                num_mocks > 0
+            ), "Cannot use HARTLAP correction with covariance not determined from mocks. Set correction to Correction.NONE"
+        if self.correction is Correction.HARTLAP:  # From Hartlap 2007
+            chi2 *= (num_mocks - len(data) - 2) / (num_mocks - 1)
+
+        return -0.5 * (chi2 + np.log(np.linalg.det(F2)))
+
+    def get_chi2_partial_marg_likelihood(
+        self, data, model, model_odd, marg_model, marg_model_odd, icov, icov_m_w, num_mocks=None, num_params=None
+    ):
+        """Computes the chi2 corrected likelihood.
+
+        Parameters
+        ----------
+        model : np.ndarray
+            The model predictions without any nuisance parameters
+        marg_model : np.ndarray
+            The parts of the model that depend on nuisance parameters
+        data : np.ndarray
+            The data vector
+        icov : np.ndarray
+            Inverted covariance matrix.
+        num_mocks : int, optional
+            The number of mocks used to estimate the covariance. Used for corrections.
+        num_params : int, optional
+            The number of parameters in the model. Used for corrections.
+
+        Returns
+        -------
+        log_likelihood : float
+            The (corrected) log-likelihood value from the computed chi2.
+        """
+
+        # First compute the MLE values for the nuisance parameters
+        bband = self.get_ML_nuisance(data, model, model_odd, marg_model, marg_model_odd, icov, icov_m_w)
+
+        # Add these on to the models
+        model += bband @ marg_model
+        model_odd += bband @ marg_model_odd
+
+        return self.get_chi2_likelihood(data, model, model_odd, icov, icov_m_w, num_mocks=num_mocks, num_params=num_params)
+
+    def get_ML_nuisance(self, data, model, model_odd, marg_model, marg_model_odd, icov, icov_m_w):
+
+        if icov_m_w[0] is None:
+            full_model = model + model_odd
+            full_marg_model = marg_model + marg_model_odd
+            F11 = full_marg_model @ icov @ (data - full_model)
+            F2 = full_marg_model @ icov @ full_marg_model.T
+            F2inv = np.linalg.inv(F2)
+        else:
+            F11 = (
+                marg_model_odd @ icov_m_w[0] @ data
+                + marg_model @ icov_m_w[1] @ data
+                - marg_model_odd @ icov_m_w[2] @ model_odd
+                - marg_model @ icov_m_w[3] @ model_odd
+                - marg_model_odd @ icov_m_w[3].T @ model
+                - marg_model @ icov_m_w[4] @ model
+            )
+            F2 = (
+                marg_model_odd @ icov_m_w[2] @ marg_model_odd.T
+                + 2.0 * marg_model @ icov_m_w[3] @ marg_model_odd.T
+                + marg_model @ icov_m_w[4] @ marg_model.T
+            )
+            F2inv = np.linalg.inv(F2)
+
+        bband = F2inv @ F11
+
+        return bband
+
+    def get_alphas(self, alpha, epsilon):
+        """Computes values of alpha_par and alpha_perp from the input values of alpha and epsilon
+
+        Parameters
+        ----------
+        alpha : float
+            The isotropic dilation scale
+        epsilon: float
+            The anisotropic warping
+
+        Returns
+        -------
+        alpha_par : float
+            The dilation scale parallel to the line-of-sight
+        alpha_perp : float
+            The dilation scale perpendicular to the line-of-sight
+
+        """
+        return alpha * (1.0 + epsilon) ** 2, alpha / (1.0 + epsilon)
+
+    @lru_cache(maxsize=32)
+    def get_muprime(self, epsilon):
+        """Computes dilated values of mu given input values of epsilon for the power spectrum
+
+        Parameters
+        ----------
+        epsilon: float
+            The anisotropic warping
+
+        Returns
+        -------
+        muprime : np.ndarray
+            The dilated mu values
+
+        """
+        musq = self.mu ** 2
+        muprime = self.mu / np.sqrt(musq + (1.0 + epsilon) ** 6 * (1.0 - musq))
+        return muprime
 
     def get_raw_start(self):
         """ Gets a uniformly distributed starting point between parameter min and max constraints """
@@ -281,7 +492,7 @@ class Model(ABC):
         return self.precompute.__func__ != func2.__func__
 
     def precompute(self, camb, om, h0):
-        """ A function available for overriding that precomputes values that depend only on the outputs of CAMB.
+        """A function available for overriding that precomputes values that depend only on the outputs of CAMB.
 
         Parameters
         ----------
@@ -311,7 +522,12 @@ class Model(ABC):
 
         self.logger.info("Starting basin hopping to find a good starting point")
         res = basinhopping(
-            minimise, self.scale(start_close), niter_success=3, niter=30, stepsize=0.05, minimizer_kwargs={"method": "Nelder-Mead", "options": {"maxiter": 600}}
+            minimise,
+            self.scale(start_close),
+            niter_success=3,
+            niter=30,
+            stepsize=0.05,
+            minimizer_kwargs={"method": "Nelder-Mead", "options": {"maxiter": 600}},
         )
 
         scaled_start = res.x
@@ -366,18 +582,13 @@ class Model(ABC):
         params = [p.min + s * (p.max - p.min) for s, p in zip(scaled, self.get_active_params())]
         return params
 
-    def optimize(self, close_default=3, niter=100, maxiter=1000):
-        """ Perform local optimiation to try and find the best fit of your model to the dataset loaded in.
+    def optimize(self, tol=1.0e-6):
+        """Perform local optimisation to try and find the best fit of your model to the dataset loaded in.
 
         Parameters
         ----------
-        close_default : int, optional
-            How close to the default values we should start our walk. Higher numbers mean closer to the default.
-            Used to compute a weighted avg between the default and a uniformly selected starting point.
-        niter : int, optional
-            How many iterations to run the `basinhopping` algorithm for.
-        maxiter : int, optional
-            How many steps each iteration can take in the `basinhopping` algorithm.
+        tol : float, optional
+            Optimisation tolerance
 
         Returns
         -------
@@ -391,26 +602,11 @@ class Model(ABC):
         def minimise(scale_params):
             return -self.get_posterior(self.unscale(scale_params))
 
-        fs = []
-        xs = []
-        methods = ["Nelder-Mead"]
-        for m in methods:
-            start = np.array(self.get_raw_start())
-            if close_default:
-                start = [(s + p.default * close_default) / (1 + close_default) for s, p in zip(start, self.get_active_params())]
-            res = basinhopping(
-                minimise,
-                self.scale(start),
-                niter_success=10,
-                niter=niter,
-                stepsize=0.05,
-                minimizer_kwargs={"method": m, "options": {"maxiter": maxiter, "fatol": 1.0e-8, "xatol": 1.0e-8}},
-            )
-            fs.append(res.fun)
-            xs.append(res.x)
-        fs = np.array(fs)
-        ps = self.unscale(xs[fs.argmin()])
-        return self.get_param_dict(ps), fs.min()
+        bounds = [(0.0, 1.0) for _ in self.get_active_params()]
+        res = differential_evolution(minimise, bounds, tol=tol)
+
+        ps = self.unscale(res.x)
+        return self.get_param_dict(ps), -res.fun
 
     def plot_default(self, dataset):
         params = self.get_param_dict(self.get_defaults())
@@ -418,11 +614,11 @@ class Model(ABC):
         self.plot(params)
 
     @abstractmethod
-    def plot(self, params, smooth_params=None, figname=None):
+    def plot(self, params, smooth_params=None, figname=None, plt_errs = True):
         """ Plots the predictions given some input parameter dictionary. """
         pass
 
-    def sanity_check(self, dataset, niter=200, maxiter=1000, figname=None):
+    def sanity_check(self, dataset, niter=200, maxiter=10000, figname=None, plot=True, plt_errs = True):
         import timeit
 
         print(f"Using dataset {str(dataset)}")
@@ -443,22 +639,15 @@ class Model(ABC):
         print("Model posterior takes on average, %.2f milliseconds" % (timeit.timeit(timing, number=niter) * 1000 / niter))
 
         print("Starting model optimisation. This may take some time.")
-        p, minv = self.optimize(niter=niter, maxiter=maxiter)
+        p, minv = self.optimize()
+        
         print(f"Model optimisation with value {minv:0.3f} has parameters are {dict(p)}")
 
-        print("Plotting model and data")
-        self.plot(p, figname=figname)
+        if plot:
+            print("Plotting model and data")
+            self.plot(p, figname=figname, plt_errs = plt_errs)
 
-    def integrate_mu(self, pk2d, mu, isotropic=False):
-        pk0 = simps(pk2d, mu, axis=1)
-        if isotropic:
-            pk2 = None
-            pk4 = None
-        else:
-            pk2 = 3.0 * simps(pk2d * mu ** 2, mu)
-            pk4 = 1.125 * (35.0 * simps(pk2d * mu ** 4, mu, axis=1) - 10.0 * pk2 + 3.0 * pk0)
-            pk2 = 2.5 * (pk2 - pk0)
-        return pk0, pk2, pk4
+        return minv, p
 
 
 if __name__ == "__main__":

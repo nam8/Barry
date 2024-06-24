@@ -4,16 +4,16 @@
 #SBATCH -C haswell
 #SBATCH --array=1-{num_tasks}%{num_concurrent}
 #SBATCH --ntasks={num_fits_per_job}
-#SBATCH --account=desi
-#SBATCH --cpus-per-task=2
+#SBATCH --account={account}
+#SBATCH --cpus-per-task=1
 #SBATCH --nodes=1
-#SBATCH --mem=8GB
+#SBATCH --mem=0
 #SBATCH -t 24:00:00
 #SBATCH -o {output_dir}/{name}.o%j
 
+source ~/.bashrc.ext
 IDIR={directory}
-conda deactivate
-conda activate Barry
+conda activate {conda_env}
 
 echo "Activated python"
 executable=$(which python)
@@ -28,10 +28,10 @@ echo "$PROG $PARAMS"
 cd $IDIR
 sleep $((RANDOM % 5))
 
-for ((i=1;i<=END;i++)); do
+for ((i=0;i<END;i++)); do
     echo "Loop iteration $i"
     ANUM=`expr $PARAMS \* $END + $i`
     echo "Executing $executable $PROG $ANUM"
-    srun -u --exclusive --nodes 1 --ntasks 1 --output "{output_dir}/{name}_$ANUM.log" $executable $PROG $ANUM  &
+    srun -u --exclusive --nodes 1 --ntasks 1 --mem-per-cpu=4GB --output "{output_dir}/{name}_$ANUM.log" $executable $PROG $ANUM  &
 done
 wait

@@ -5,7 +5,7 @@ from barry.samplers.sampler import Sampler
 
 
 class DynestySampler(Sampler):
-    def __init__(self, temp_dir=None, max_iter=None, nlive=500):
+    def __init__(self, temp_dir=None, max_iter=None, dynamic=False, nlive=500):
 
         self.logger = logging.getLogger("barry")
         self.max_iter = max_iter
@@ -14,9 +14,13 @@ class DynestySampler(Sampler):
         self.temp_dir = temp_dir
         if temp_dir is not None and not os.path.exists(temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
+        self.dynamic = dynamic
 
     def get_filename(self, uid):
-        return os.path.join(self.temp_dir, f"{uid}_chain.npy")
+        if self.dynamic:
+            return os.path.join(self.temp_dir, f"{uid}_dyn_chain.npy")
+        else:
+            return os.path.join(self.temp_dir, f"{uid}_nest_chain.npy")
 
     def fit(self, log_likelihood, start, num_dim, prior_transform, save_dims=None, uid=None):
 
@@ -30,11 +34,53 @@ class DynestySampler(Sampler):
 
         if save_dims is None:
             save_dims = num_dim
-        self.logger.debug("Fitting framework with %d dimensions" % num_dim)
+        self.logger.info("Fitting framework with %d dimensions and %d live points" % (num_dim , self.nlive))
         self.logger.info("Using dynesty Sampler")
-        sampler = dynesty.NestedSampler(log_likelihood, prior_transform, num_dim, nlive=self.nlive)
+        if self.dynamic:
+            sampler = dynesty.DynamicNestedSampler(
+                log_likelihood, prior_transform, num_dim, nlive_init=self.nlive, nlive_batch=200, maxbatch=10
+            )
+        else:
+            sampler = dynesty.NestedSampler(log_likelihood, prior_transform, num_dim, nlive=self.nlive)
 
-        sampler.run_nested(maxiter=self.max_iter, print_progress=False)
+            
+
+        # £££££££££££££££££££££££££££££££££ 
+        # sampler.run_nested(maxiter=1000, print_progress=True)
+        sampler.run_nested(maxiter=self.max_iter, print_progress=True)
+        # res = sampler.results
+        # import matplotlib
+        # from matplotlib import pyplot as plt
+        # from dynesty import plotting as dyplot
+
+        # print(res.keys())
+
+        # dynesty.plotting.traceplot(res) 
+        # plt.savefig("/home/nam/bao_fit_project/dynesty-traceplot.png")
+        # exit(1)
+
+        # compute effective 'multi' volumes
+        # multi_logvols = [0.]  # unit cube
+        # for bound in res.bound[1:]:  # skip unit cube
+        #     logvol, funit = bound.monte_carlo_logvol(rstate=rstate, return_overlap=True)
+        #     multi_logvols.append(logvol +np.log( funit))  # numerical estimate via Monte Carlo methods
+        # multi_logvols = np.array(multi_logvols)
+
+        # # plot results as a function of ln(volume)
+        # plt.figure(figsize=(12,6))
+        # plt.xlabel(r'$-\ln X_i$')
+        # plt.ylabel(r'$\ln V_i$')
+
+        # # 'multi'
+        # x, it = -res.logvol, res.bound_iter
+        # y = multi_logvols[it]
+        # plt.plot(x, y, lw=3, label='multi')
+        # plt.legend(loc='best', fontsize=24);
+        # plt.savefig("/home/nam/bao_fit_project/dynesty.png")
+        # exit(1)
+
+        # £££££££££££££££££££££££££££££££££ 
+
 
         self.logger.debug("Fit finished")
 
